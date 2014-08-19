@@ -21,6 +21,7 @@ import scala.collection.JavaConverters._
 import scala.collection.mutable.HashMap
 
 /**
+ * 主要由HaskMap构成的键值对，只能一次性确定，传给SparkContext后就不能修改了
  * Configuration for a Spark application. Used to set various Spark parameters as key-value pairs.
  *
  * Most of the time, you would create a SparkConf object with `new SparkConf()`, which will load

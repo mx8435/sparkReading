@@ -844,13 +844,13 @@ abstract class RDD[T: ClassTag](
   /**
    * Return the number of elements in the RDD.
    */
-  //def count(): Long = sc.runJob(this, Utils.getIteratorSize _).sum
-  def count(): Long = {
+  def count(): Long = sc.runJob(this, Utils.getIteratorSize _).sum
+  def count2(): Long = {
     sc.runJob(this,(iter:Iterator[T])=>{
       var res=0L
       while(iter.hasNext){
         iter.next()
-        res+=10L
+        res+=1L
       }
       res
     }).sum

@@ -1159,6 +1159,10 @@ private[scheduler] class DAGSchedulerActorSupervisor(dagScheduler: DAGScheduler)
   }
 }
 
+/**
+ * 专门用来处理各类事件的类
+ * @param dagScheduler
+ */
 private[scheduler] class DAGSchedulerEventProcessActor(dagScheduler: DAGScheduler)
   extends Actor with Logging {
 
