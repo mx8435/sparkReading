@@ -54,6 +54,12 @@ class CartesianRDD[T: ClassTag, U: ClassTag](
 
   val numPartitionsInRdd2 = rdd2.partitions.size
 
+  /**
+   * 产生子RDD的每个partition。
+   * 一个子RDD的第i个分区由父RDDa中的第i/numPartitionRddb个分区和父RDDb中的第i%numPartitionRdda个分区构成。
+   * 所以子RDD中每个分区的索引idx=s1.index * numPartitionsInRdd2 + s2.index
+   * @return 包含子RDD各分区的Array
+   */
   override def getPartitions: Array[Partition] = {
     // create the cross product split
     val array = new Array[Partition](rdd1.partitions.size * rdd2.partitions.size)
@@ -69,12 +75,24 @@ class CartesianRDD[T: ClassTag, U: ClassTag](
     (rdd1.preferredLocations(currSplit.s1) ++ rdd2.preferredLocations(currSplit.s2)).distinct
   }
 
+  /**
+   * 产生Output records
+   * @param split 待生成的split
+   * @param context
+   * @return
+   */
   override def compute(split: Partition, context: TaskContext) = {
     val currSplit = split.asInstanceOf[CartesianPartition]
+    //枚举当前split中，每个record的两个父rdd的records(这里分别为x和y)。将这两个父records组成(x,y)，
+    // 这样，最后会返回一个Iterator
     for (x <- rdd1.iterator(currSplit.s1, context);
          y <- rdd2.iterator(currSplit.s2, context)) yield (x, y)
   }
 
+  /** CartesianRDD中，子RDD与两个父RDD的关系均为NarrowDependency，其中每个子partition i由父rdd a的
+    * List(id / numPartitionsInRdd2)和父rdd b的List(id % numPartitionsInRdd2)构成
+    * @return
+    */
   override def getDependencies: Seq[Dependency[_]] = List(
     new NarrowDependency(rdd1) {
       def getParents(id: Int): Seq[Int] = List(id / numPartitionsInRdd2)

@@ -81,20 +81,30 @@ class CoGroupedRDD[K](@transient var rdds: Seq[RDD[_ <: Product2[K, _]]], part: 
     this
   }
 
+  /**
+   * 根据各父RDD与子RDD的partitioner是否一致，返回父子RDD的依赖关系。
+   * 仅当二者的partitioner和numPartitions均一致时才为OneToOneDependency，否侧为ShuffleDependency
+   * @return
+   */
   override def getDependencies: Seq[Dependency[_]] = {
+    //采用Seq.map依次生成各依赖关系
     rdds.map { rdd: RDD[_ <: Product2[K, _]] =>
       if (rdd.partitioner == Some(part)) {
         logDebug("Adding one-to-one dependency with " + rdd)
-        new OneToOneDependency(rdd)
+        new OneToOneDependency(rdd)//如果有partitioner是相同的，则是1:1依赖
       } else {
         logDebug("Adding shuffle dependency with " + rdd)
-        new ShuffleDependency[Any, Any](rdd, part, serializer)
+        new ShuffleDependency[Any, Any](rdd, part, serializer)//否则为ShuffleDependency
       }
     }
   }
 
+  /**
+   * 获取当前CoGroupedRDD的各个分区，保存在Array中，数组的大小有partitioner中的分区数指定
+   * @return
+   */
   override def getPartitions: Array[Partition] = {
-    val array = new Array[Partition](part.numPartitions)
+    val array = new Array[Partition](part.numPartitions)//CoGroupedRDD的partitions数目
     for (i <- 0 until array.size) {
       // Each CoGroupPartition will have a dependency per contributing RDD
       array(i) = new CoGroupPartition(i, rdds.zipWithIndex.map { case (rdd, j) =>

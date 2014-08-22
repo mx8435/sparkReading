@@ -190,8 +190,9 @@ class DAGScheduler(
    * a lower jobId (jobId always increases across jobs.)
    */
   private def getShuffleMapStage(shuffleDep: ShuffleDependency[_,_], jobId: Int): Stage = {
-    shuffleToMapStage.get(shuffleDep.shuffleId) match {
-      case Some(stage) => stage
+    shuffleToMapStage.get(shuffleDep.shuffleId) match {//如果shuffleToMapStage哈希表中已经记录了该shuffle
+      case Some(stage) => stage//返回该stage
+      //没有记录的话，要判断是否mapOutputTracker中是否有记录，没记录就向mapOutputTracker注册该shuffle
       case None =>
         val stage =
           newOrUsedStage(shuffleDep.rdd, shuffleDep.rdd.partitions.size, shuffleDep, jobId)
@@ -237,24 +238,25 @@ class DAGScheduler(
       callSite: Option[String] = None)
     : Stage =
   {
-    val stage = newStage(rdd, numTasks, Some(shuffleDep), jobId, callSite)
-    if (mapOutputTracker.containsShuffle(shuffleDep.shuffleId)) {
-      val serLocs = mapOutputTracker.getSerializedMapOutputStatuses(shuffleDep.shuffleId)
+    val stage = newStage(rdd, numTasks, Some(shuffleDep), jobId, callSite)//根据该rdd创建一个新的stage
+    if (mapOutputTracker.containsShuffle(shuffleDep.shuffleId)) {//如果当前mapOutPutTracker中已经记录了该shuffle，保存了该shuffle中各ShuffleMapStage数据的输出位置
+      val serLocs = mapOutputTracker.getSerializedMapOutputStatuses(shuffleDep.shuffleId)//获取该stage生成记录的输出位置
       val locs = MapOutputTracker.deserializeMapStatuses(serLocs)
-      for (i <- 0 until locs.size) {
+      for (i <- 0 until locs.size) {//保存当stage实体中
         stage.outputLocs(i) = Option(locs(i)).toList   // locs(i) will be null if missing
       }
-      stage.numAvailableOutputs = locs.count(_ != null)
-    } else {
+      stage.numAvailableOutputs = locs.count(_ != null)//记录可用的输出数
+    } else {//不存在该stage的话，就向mapOutputTracker注册该shuffle
       // Kind of ugly: need to register RDDs with the cache and map output tracker here
       // since we can't do it in the RDD constructor because # of partitions is unknown
       logInfo("Registering RDD " + rdd.id + " (" + rdd.getCreationSite + ")")
-      mapOutputTracker.registerShuffle(shuffleDep.shuffleId, rdd.partitions.size)
+      mapOutputTracker.registerShuffle(shuffleDep.shuffleId, rdd.partitions.size)//注册该rdd
     }
     stage
   }
 
   /**
+   * 反向visit遍历，由当前rdd出发，遍历收集各parentStages
    * Get or create the list of parent stages for a given RDD. The stages will be assigned the
    * provided jobId if they haven't already been created with a lower jobId.
    */
@@ -268,6 +270,7 @@ class DAGScheduler(
         // we can't do it in its constructor because # of partitions is unknown
         for (dep <- r.dependencies) {
           dep match {
+              //如果是ShuffleDep就切分该stage
             case shufDep: ShuffleDependency[_,_] =>
               parents += getShuffleMapStage(shufDep, jobId)
             case _ =>
@@ -438,6 +441,18 @@ class DAGScheduler(
     waiter
   }
 
+  /**
+   * 提交该Job，获得一个jobWaitor，阻塞，并根据job的执行结果记录日记
+   * @param rdd
+   * @param func
+   * @param partitions
+   * @param callSite
+   * @param allowLocal
+   * @param resultHandler 定义如何对从各个 partition 收集来的 results 进行计算来得到最终结果。
+   * @param properties
+   * @tparam T
+   * @tparam U
+   */
   def runJob[T, U: ClassTag](
       rdd: RDD[T],
       func: (TaskContext, Iterator[T]) => U,
@@ -590,7 +605,8 @@ class DAGScheduler(
     }
   }
 
-  /** Finds the earliest-created active job that needs the stage */
+  /**获得该stage对应的最早创建的jobid
+   *  Finds the earliest-created active job that needs the stage */
   // TODO: Probably should actually find among the active jobs that need this
   // stage the one with the highest priority (highest-priority pool, earliest created).
   // That should take care of at least part of the priority inversion problem with
@@ -656,6 +672,17 @@ class DAGScheduler(
     submitWaitingStages()
   }
 
+  /**
+   * 处理提交的任务
+   * @param jobId
+   * @param finalRDD
+   * @param func
+   * @param partitions
+   * @param allowLocal
+   * @param callSite
+   * @param listener
+   * @param properties
+   */
   private[scheduler] def handleJobSubmitted(jobId: Int,
       finalRDD: RDD[_],
       func: (TaskContext, Iterator[_]) => _,
@@ -669,7 +696,7 @@ class DAGScheduler(
     try {
       // New stage creation may throw an exception if, for example, jobs are run on a
       // HadoopRDD whose underlying HDFS files have been deleted.
-      finalStage = newStage(finalRDD, partitions.size, None, jobId, Some(callSite))
+      finalStage = newStage(finalRDD, partitions.size, None, jobId, Some(callSite))//创建根据该rdd创建final Stage
     } catch {
       case e: Exception =>
         logWarning("Creating new stage failed due to exception - job: " + jobId, e)
@@ -700,23 +727,26 @@ class DAGScheduler(
     submitWaitingStages()
   }
 
-  /** Submits stage, but first recursively submits any missing parents. */
+  /**提交该stage，会先执行未执行的parentStage，等到执行parentStage执行完毕再执行该stage
+   *  Submits stage, but first recursively submits any missing parents.
+   *
+   */
   private def submitStage(stage: Stage) {
-    val jobId = activeJobForStage(stage)
-    if (jobId.isDefined) {
+    val jobId = activeJobForStage(stage)//获取该stage对应的最早创建的jobid
+    if (jobId.isDefined) {//如果该job已经创建（定义）
       logDebug("submitStage(" + stage + ")")
-      if (!waitingStages(stage) && !runningStages(stage) && !failedStages(stage)) {
-        val missing = getMissingParentStages(stage).sortBy(_.id)
+      if (!waitingStages(stage) && !runningStages(stage) && !failedStages(stage)) {//stage并未处于等待、执行、失败状态
+        val missing = getMissingParentStages(stage).sortBy(_.id)//找出所有失效/未执行的parentStage
         logDebug("missing: " + missing)
-        if (missing == Nil) {
+        if (missing == Nil) {//所有parentStage均已就绪
           logInfo("Submitting " + stage + " (" + stage.rdd + "), which has no missing parents")
-          submitMissingTasks(stage, jobId.get)
-          runningStages += stage
+          submitMissingTasks(stage, jobId.get)//生成和提交该stage中具体的task
+          runningStages += stage//将该stage加入到执行队列中
         } else {
-          for (parent <- missing) {
+          for (parent <- missing) {//对于所有未执行的parentStage，挨个执行
             submitStage(parent)
           }
-          waitingStages += stage
+          waitingStages += stage//将该stage加入到等待执行的stage集合中，等待parentStage执行完毕再执行
         }
       }
     } else {
@@ -725,19 +755,23 @@ class DAGScheduler(
   }
 
 
-  /** Called when stage's parents are available and we can now do its task. */
+  /**
+   * 生成并提交一个stage中未执行的tasks:
+   * 如果是该stage是ShuffleMapStage-->提交finalRDD.numPartitions个ShuffleMapTasks；
+   * 如果是ResultStage->提交finalRDD.numPartitions个ResultTasks；
+   * Called when stage's parents are available and we can now do its task. */
   private def submitMissingTasks(stage: Stage, jobId: Int) {
     logDebug("submitMissingTasks(" + stage + ")")
     // Get our pending tasks and remember them in our pendingTasks entry
-    val myPending = pendingTasks.getOrElseUpdate(stage, new HashSet)
-    myPending.clear()
+    val myPending = pendingTasks.getOrElseUpdate(stage, new HashSet)//获取等待执行的tasks
+    myPending.clear()//清空
     var tasks = ArrayBuffer[Task[_]]()
-    if (stage.isShuffleMap) {
+    if (stage.isShuffleMap) {//如果是该stage是ShuffleMapStage，就创建与最后一个RDD的partitions数目相同的ShuffleMapTasks
       for (p <- 0 until stage.numPartitions if stage.outputLocs(p) == Nil) {
         val locs = getPreferredLocs(stage.rdd, p)
         tasks += new ShuffleMapTask(stage.id, stage.rdd, stage.shuffleDep.get, p, locs)
       }
-    } else {
+    } else {//如果是ResultStage，就创建与最后一个RDD的partitions数目相同的ResultTasks
       // This is a final stage; figure out its job's missing partitions
       val job = resultStageToJob(stage)
       for (id <- 0 until job.numPartitions if !job.finished(id)) {
@@ -775,7 +809,7 @@ class DAGScheduler(
       logInfo("Submitting " + tasks.size + " missing tasks from " + stage + " (" + stage.rdd + ")")
       myPending ++= tasks
       logDebug("New pending tasks: " + myPending)
-      taskScheduler.submitTasks(
+      taskScheduler.submitTasks(//封装成TaskSet并提交
         new TaskSet(tasks.toArray, stage.id, stage.newAttemptId(), stage.jobId, properties))
       stageToInfos(stage).submissionTime = Some(System.currentTimeMillis())
     } else {

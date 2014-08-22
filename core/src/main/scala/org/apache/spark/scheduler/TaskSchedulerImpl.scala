@@ -132,6 +132,11 @@ private[spark] class TaskSchedulerImpl(
 
   def newTaskId(): Long = nextTaskId.getAndIncrement()
 
+  /**
+   * TaskScheduler的任务是对
+   *
+   *
+   */
   override def start() {
     backend.start()
 
@@ -145,13 +150,17 @@ private[spark] class TaskSchedulerImpl(
     }
   }
 
+  /**
+   * 提交tasks
+   * @param taskSet
+   */
   override def submitTasks(taskSet: TaskSet) {
     val tasks = taskSet.tasks
     logInfo("Adding task set " + taskSet.id + " with " + tasks.length + " tasks")
-    this.synchronized {
-      val manager = new TaskSetManager(this, taskSet, maxTaskFailures)
-      activeTaskSets(taskSet.id) = manager
-      schedulableBuilder.addTaskSetManager(manager, manager.taskSet.properties)
+    this.synchronized {//需要同步
+      val manager = new TaskSetManager(this, taskSet, maxTaskFailures)//将该taskSet封装成一个taskManager
+      activeTaskSets(taskSet.id) = manager//加入到激活task集合
+      schedulableBuilder.addTaskSetManager(manager, manager.taskSet.properties)//加入到schedulableBuilder
 
       if (!isLocal && !hasReceivedTask) {
         starvationTimer.scheduleAtFixedRate(new TimerTask() {
@@ -201,7 +210,7 @@ private[spark] class TaskSchedulerImpl(
       .format(manager.taskSet.id, manager.parent.name))
   }
 
-  /**
+  /**由调度器调用来提供slaves上的资源。根据tasks中各个task的优先级顺序进行响应。为了在集群中均衡各task，采用round-robin方式来为每个task选择executor节点
    * Called by cluster manager to offer resources on slaves. We respond by asking our active task
    * sets for tasks in order of priority. We fill each node with tasks in a round-robin manner so
    * that tasks are balanced across the cluster.
@@ -219,8 +228,10 @@ private[spark] class TaskSchedulerImpl(
     }
 
     // Randomly shuffle offers to avoid always placing tasks on the same set of workers.
+    //对资源请求进行随机排序
     val shuffledOffers = Random.shuffle(offers)
     // Build a list of tasks to assign to each worker.
+    //为每个worker分配一堆tasks
     val tasks = shuffledOffers.map(o => new ArrayBuffer[TaskDescription](o.cores))
     val availableCpus = shuffledOffers.map(o => o.cores).toArray
     val sortedTaskSets = rootPool.getSortedTaskSetQueue

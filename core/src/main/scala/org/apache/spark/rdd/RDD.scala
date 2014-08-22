@@ -270,6 +270,7 @@ abstract class RDD[T: ClassTag](
   def map[U: ClassTag](f: T => U): RDD[U] = new MappedRDD(this, sc.clean(f))
 
   /**
+   * 生成一个FlatMappedRDD，功能类似于scala原始的flatMAp：即应用传入的func到每个元素，再flatten
    *  Return a new RDD by first applying a function to all elements of this
    *  RDD, and then flattening the results.
    */
@@ -570,7 +571,7 @@ abstract class RDD[T: ClassTag](
     new MapPartitionsRDD(this, sc.clean(func), preservesPartitioning)
   }
 
-  /**
+  /**对每个partition进行执行函数f，返回一个MapPartitionsRDD
    * :: DeveloperApi ::
    * Return a new RDD by applying a function to each partition of this RDD. This is a variant of
    * mapPartitions that also passes the TaskContext into the closure.

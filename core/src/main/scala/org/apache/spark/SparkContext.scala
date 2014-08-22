@@ -206,7 +206,7 @@ class SparkContext(config: SparkConf) extends Logging {
     conf.get("spark.driver.port").toInt,
     isDriver = true,
     isLocal = isLocal,
-    listenerBus = listenerBus)
+    listenerBus = listenerBus)//首先创建SparkEnv
   SparkEnv.set(env)
 
   // Used to store a URL for each static file/jar together with the file's local timestamp
@@ -304,7 +304,8 @@ class SparkContext(config: SparkConf) extends Logging {
   executorEnvs("SPARK_USER") = sparkUser
 
   // Create and start the scheduler
-  private[spark] var taskScheduler = SparkContext.createTaskScheduler(this, master)
+  private[spark] var taskScheduler = SparkContext.createTaskScheduler(this, master)//创建一个TS
+  //创建一个DAGS
   @volatile private[spark] var dagScheduler: DAGScheduler = _
   try {
     dagScheduler = new DAGScheduler(this)
@@ -315,7 +316,7 @@ class SparkContext(config: SparkConf) extends Logging {
 
   // start TaskScheduler after taskScheduler sets DAGScheduler reference in DAGScheduler's
   // constructor
-  taskScheduler.start()
+  taskScheduler.start()///启动相应的backed和计时器
 
   private[spark] val cleaner: Option[ContextCleaner] = {
     if (conf.getBoolean("spark.cleaner.referenceTracking", true)) {
@@ -455,7 +456,7 @@ class SparkContext(config: SparkConf) extends Logging {
    */
   def textFile(path: String, minPartitions: Int = defaultMinPartitions): RDD[String] = {
     hadoopFile(path, classOf[TextInputFormat], classOf[LongWritable], classOf[Text],
-      minPartitions).map(pair => pair._2.toString)
+      minPartitions).map(pair => pair._2.toString)//由于HadoopRDD存在重用，所以需要调用map方法处理每一行，才能cache该HadoopRDD，即生成一个新的MaperedRDD
   }
 
   /**
@@ -1046,7 +1047,7 @@ class SparkContext(config: SparkConf) extends Logging {
     logInfo("Starting job: " + callSite)
     val start = System.nanoTime
     dagScheduler.runJob(rdd, cleanedFunc, partitions, callSite, allowLocal,
-      resultHandler, localProperties.get)
+      resultHandler, localProperties.get)//调用DAGScheduler执行该job
     logInfo("Job finished: " + callSite + ", took " + (System.nanoTime - start) / 1e9 + " s")
     rdd.doCheckpoint()
   }
