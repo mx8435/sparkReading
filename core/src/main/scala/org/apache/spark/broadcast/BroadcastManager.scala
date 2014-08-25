@@ -35,17 +35,20 @@ private[spark] class BroadcastManager(
   initialize()
 
   // Called by SparkContext or Executor before using Broadcast
+  /**
+   * 在创建SparkEnv时调用，初始化所采用的的广播工厂
+   */
   private def initialize() {
     synchronized {
       if (!initialized) {
         val broadcastFactoryClass =
-          conf.get("spark.broadcast.factory", "org.apache.spark.broadcast.HttpBroadcastFactory")
+          conf.get("spark.broadcast.factory", "org.apache.spark.broadcast.HttpBroadcastFactory")//默认采用HttpBroadcast
 
         broadcastFactory =
           Class.forName(broadcastFactoryClass).newInstance.asInstanceOf[BroadcastFactory]
 
         // Initialize appropriate BroadcastFactory and BroadcastObject
-        broadcastFactory.initialize(isDriver, conf, securityManager)
+        broadcastFactory.initialize(isDriver, conf, securityManager)//调用对应的initialize方法进行初始化相应的broadcastServer
 
         initialized = true
       }

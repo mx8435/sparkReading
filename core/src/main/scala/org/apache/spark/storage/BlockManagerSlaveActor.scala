@@ -24,7 +24,7 @@ import akka.actor.{ActorRef, Actor}
 import org.apache.spark.{Logging, MapOutputTracker}
 import org.apache.spark.storage.BlockManagerMessages._
 
-/**
+/**用于接收来自master的块管理命令，如删除本地块
  * An actor to take commands from the master to execute options. For example,
  * this is used to remove blocks from the slave's BlockManager.
  */
@@ -59,7 +59,7 @@ class BlockManagerSlaveActor(
 
     case RemoveBroadcast(broadcastId, tellMaster) =>
       doAsync[Int]("removing broadcast " + broadcastId, sender) {
-        blockManager.removeBroadcast(broadcastId, tellMaster)
+        blockManager.removeBroadcast(broadcastId, tellMaster)//接收到移除广播变量的消息
       }
 
     case GetBlockStatus(blockId, _) =>

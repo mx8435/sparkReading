@@ -53,7 +53,7 @@ private[spark] class HttpBroadcast[T: ClassTag](
       blockId, value_, StorageLevel.MEMORY_AND_DISK, tellMaster = false)
   }
 
-  if (!isLocal) {//如果不是本地模式会为广播变量其创建一个文件，如果是本地的话不需要广播？？？
+  if (!isLocal) {//如果不是本地模式会为广播变量其创建一个文件，如果是本地模式的话不需要广播？？？
     HttpBroadcast.write(id, value_)
   }
 
@@ -77,22 +77,23 @@ private[spark] class HttpBroadcast[T: ClassTag](
     out.defaultWriteObject()
   }
 
-  /** 读取broadcast对象？
+  /** 获取broadcast对象。由JVM在反序列化广播变量时调用
    * Used by the JVM when deserializing this object. */
   private def readObject(in: ObjectInputStream) {
     in.defaultReadObject()
     HttpBroadcast.synchronized {
       SparkEnv.get.blockManager.getSingle(blockId) match {
-        case Some(x) => value_ = x.asInstanceOf[T]
+        case Some(x) => value_ = x.asInstanceOf[T]//如果在本地blockManager中，直接读取
         case None => {
           logInfo("Started reading broadcast variable " + id)
           val start = System.nanoTime
-          value_ = HttpBroadcast.read[T](id)
+          value_ = HttpBroadcast.read[T](id)//调用HttpBroadcast去读取
           /*
            * We cache broadcast data in the BlockManager so that subsequent tasks using it
            * do not need to re-fetch. This data is only used locally and no other node
            * needs to fetch this block, so we don't notify the master.
            */
+          //读出来之后放到blockManager中
           SparkEnv.get.blockManager.putSingle(
             blockId, value_, StorageLevel.MEMORY_AND_DISK, tellMaster = false)
           val time = (System.nanoTime - start) / 1e9
@@ -135,6 +136,7 @@ private[spark] object HttpBroadcast extends Logging {
           conf.set("spark.httpBroadcast.uri",  serverUri)
         }
         serverUri = conf.get("spark.httpBroadcast.uri")
+        //创建一个元数据清除器，定期清除超过时长的广播变量元数据
         cleaner = new MetadataCleaner(MetadataCleanerType.HTTP_BROADCAST, cleanup, conf)
         compressionCodec = CompressionCodec.createCodec(conf)
         initialized = true
@@ -174,7 +176,11 @@ private[spark] object HttpBroadcast extends Logging {
    * @param id
    * @return
    */
-  def getFile(id: Long) = new File(broadcastDir, BroadcastBlockId(id).name)
+  def getFile(id: Long) ={
+    val fileName=BroadcastBlockId(id).name
+    logInfo("[CKL ADD]create a broadcast file in:"+broadcastDir.getAbsolutePath+"/"+fileName)
+    new File(broadcastDir, fileName)
+  }
 
   /**
    * 在broadcast目录下创建一个文件，并将value的数据存到该文件中
@@ -197,6 +203,12 @@ private[spark] object HttpBroadcast extends Logging {
     files += file
   }
 
+  /**
+   * 通过Http去向HttpServer请求broadcast常/变量的数据
+   * @param id
+   * @tparam T
+   * @return
+   */
   def read[T: ClassTag](id: Long): T = {
     logDebug("broadcast read server: " +  serverUri + " id: broadcast-" + id)
     val url = serverUri + "/" + BroadcastBlockId(id).name
@@ -209,12 +221,12 @@ private[spark] object HttpBroadcast extends Logging {
       uc.setAllowUserInteraction(false)
     } else {
       logDebug("broadcast not using security")
-      uc = new URL(url).openConnection()
+      uc = new URL(url).openConnection()//通过url进行http连接
     }
 
     val in = {
       uc.setReadTimeout(httpReadTimeout)
-      val inputStream = uc.getInputStream
+      val inputStream = uc.getInputStream//获得输入流
       if (compress) {
         compressionCodec.compressedInputStream(inputStream)
       } else {
@@ -223,12 +235,12 @@ private[spark] object HttpBroadcast extends Logging {
     }
     val ser = SparkEnv.get.serializer.newInstance()
     val serIn = ser.deserializeStream(in)
-    val obj = serIn.readObject[T]()
+    val obj = serIn.readObject[T]()//读出该对象
     serIn.close()
     obj
   }
 
-  /**
+  /**从本地删除广播变量对应的缓存
    * Remove all persisted blocks associated with this HTTP broadcast on the executors.
    * If removeFromDriver is true, also remove these persisted blocks on the driver
    * and delete the associated broadcast file.
@@ -242,7 +254,7 @@ private[spark] object HttpBroadcast extends Logging {
     }
   }
 
-  /**
+  /**该方法用于周期性的清除过期的广播变量的临时文件
    * Periodically clean up old broadcasts by removing the associated map entries and
    * deleting the associated files.
    */
@@ -253,7 +265,7 @@ private[spark] object HttpBroadcast extends Logging {
       val (file, time) = (entry.getKey, entry.getValue)
       if (time < cleanupTime) {
         iterator.remove()
-        deleteBroadcastFile(file)
+        deleteBroadcastFile(file)//删除
       }
     }
   }

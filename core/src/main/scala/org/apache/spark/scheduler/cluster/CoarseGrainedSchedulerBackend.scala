@@ -99,7 +99,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
         }
 
       case ReviveOffers =>
-        makeOffers()
+        makeOffers()//资源请求，如广播数据块位置信息请求
 
       case KillTask(taskId, executorId, interruptThread) =>
         executorActor(executorId) ! KillTask(taskId, executorId, interruptThread)

@@ -214,7 +214,7 @@ object SparkEnv extends Logging {
       serializer, conf, securityManager, mapOutputTracker)
 
     val connectionManager = blockManager.connectionManager
-
+    //创建一个广播变量管理器
     val broadcastManager = new BroadcastManager(isDriver, conf, securityManager)
 
     val cacheManager = new CacheManager(blockManager)

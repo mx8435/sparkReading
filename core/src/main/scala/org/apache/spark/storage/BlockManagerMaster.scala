@@ -133,7 +133,7 @@ class BlockManagerMaster(var driverActor: ActorRef, conf: SparkConf) extends Log
   /** Remove all blocks belonging to the given broadcast. */
   def removeBroadcast(broadcastId: Long, removeFromMaster: Boolean, blocking: Boolean) {
     val future = askDriverWithReply[Future[Seq[Int]]](
-      RemoveBroadcast(broadcastId, removeFromMaster))
+      RemoveBroadcast(broadcastId, removeFromMaster))//发送移除广播变量的消息
     future.onFailure {
       case e: Throwable =>
         logError("Failed to remove broadcast " + broadcastId +

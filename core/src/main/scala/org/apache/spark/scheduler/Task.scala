@@ -134,7 +134,7 @@ private[spark] object Task {
     ByteBuffer.wrap(out.toByteArray)
   }
 
-  /**
+  /**反序列化传过来的task信息
    * Deserialize the list of dependencies in a task serialized with serializeWithDependencies,
    * and return the task itself as a serialized ByteBuffer. The caller can then update its
    * ClassLoaders and deserialize the task.

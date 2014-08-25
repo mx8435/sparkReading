@@ -58,7 +58,7 @@ private class MemoryStore(blockManager: BlockManager, maxMemory: Long)
       val elements = new ArrayBuffer[Any]
       elements ++= values
       val sizeEstimate = SizeEstimator.estimate(elements.asInstanceOf[AnyRef])
-      tryToPut(blockId, elements, sizeEstimate, true
+      tryToPut(blockId, elements, sizeEstimate, true)
       PutResult(sizeEstimate, Left(values.toIterator))
     } else {
       tryToPut(blockId, bytes, bytes.limit, false)

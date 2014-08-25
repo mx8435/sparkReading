@@ -137,7 +137,7 @@ private[spark] object BlockManagerWorker extends Logging {
   }
 
   /**
-   * 取出数据
+   * 发起连接，获取并返回数据
    * @param msg
    * @param toConnManagerId
    * @return

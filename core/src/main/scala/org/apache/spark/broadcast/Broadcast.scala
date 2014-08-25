@@ -60,7 +60,8 @@ abstract class Broadcast[T: ClassTag](val id: Long) extends Serializable {
    */
   @volatile private var _isValid = true
 
-  /** Get the broadcasted value. */
+  /**获取一个广播变量的值
+   *  Get the broadcasted value. */
   def value: T = {
     assertValid()
     getValue()

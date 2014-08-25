@@ -40,6 +40,17 @@ private[spark] case class ByteBufferValues(buffer: ByteBuffer) extends Values
 private[spark] case class IteratorValues(iterator: Iterator[Any]) extends Values
 private[spark] case class ArrayBufferValues(buffer: ArrayBuffer[Any]) extends Values
 
+/**
+ * 用于进行块管理的类，一般用于管理公共的数据，这样可以方便与其他节点共享该数据
+ * @param executorId
+ * @param actorSystem
+ * @param master
+ * @param defaultSerializer
+ * @param maxMemory
+ * @param _conf
+ * @param securityManager
+ * @param mapOutputTracker
+ */
 private[spark] class BlockManager(
     executorId: String,
     actorSystem: ActorSystem,
@@ -488,18 +499,25 @@ private[spark] class BlockManager(
     doGetRemote(blockId, asValues = false).asInstanceOf[Option[ByteBuffer]]
   }
 
+  /**
+   * 从driver那获得blockId所在的所有节点，打乱这些节点，按打乱的顺序挨个请求数据。
+   * @param blockId
+   * @param asValues
+   * @return
+   */
   private def doGetRemote(blockId: BlockId, asValues: Boolean): Option[Any] = {
     require(blockId != null, "BlockId is null")
-    val locations = Random.shuffle(master.getLocations(blockId))//从blockManagerMaster中获取blockId对应的存放位置
+    //
+    val locations = Random.shuffle(master.getLocations(blockId))//从blockManagerMaster中获取blockId对应的存放节点，打乱这些位置，按顺序请求数据直到成功
     for (loc <- locations) {
       logDebug("Getting remote block " + blockId + " from " + loc)
       val data = BlockManagerWorker.syncGetBlock(
         GetBlock(blockId), ConnectionManagerId(loc.host, loc.port))//
       if (data != null) {
         if (asValues) {
-          return Some(dataDeserialize(blockId, data))
+          return Some(dataDeserialize(blockId, data))//如果是值类型数据，需要反序列化
         } else {
-          return Some(data)
+          return Some(data)//不需要反序列化
         }
       }
       logDebug("The value of block " + blockId + " is null")
@@ -908,7 +926,7 @@ private[spark] class BlockManager(
     blocksToRemove.size
   }
 
-  /**
+  /**与该广播变量相关的数据块逐个移除
    * Remove all blocks belonging to the given broadcast.
    */
   def removeBroadcast(broadcastId: Long, tellMaster: Boolean): Int = {

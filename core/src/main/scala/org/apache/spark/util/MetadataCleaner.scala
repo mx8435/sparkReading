@@ -21,8 +21,9 @@ import java.util.{Timer, TimerTask}
 
 import org.apache.spark.{Logging, SparkConf}
 
-/**
- * Runs a timer task to periodically clean up metadata (e.g. old files or hashtable entries)
+/**一个计时任务，用于周期性的清除元数据（包括旧文件元数据、hashtable元数据、广播变量）
+ * Runs a timer task to periodically clean up metadata
+ * (e.g. old files or hashtable entries)
  */
 private[spark] class MetadataCleaner(
     cleanerType: MetadataCleanerType.MetadataCleanerType,

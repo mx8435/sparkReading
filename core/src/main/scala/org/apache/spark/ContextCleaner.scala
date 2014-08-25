@@ -78,7 +78,8 @@ private[spark] class ContextCleaner(sc: SparkContext) extends Logging {
     listeners += listener
   }
 
-  /** Start the cleaner. */
+  /** 当变量变弱（引用减少，JAVA中的术语）时，会调用该方法清理该变量
+   * Start the cleaner. */
   def start() {
     cleaningThread.setDaemon(true)
     cleaningThread.setName("Spark Context Cleaner")
@@ -111,7 +112,8 @@ private[spark] class ContextCleaner(sc: SparkContext) extends Logging {
     referenceBuffer += new CleanupTaskWeakReference(task, objectForCleanup, referenceQueue)
   }
 
-  /** Keep cleaning RDD, shuffle, and broadcast state. */
+  /** 清理该变量（RDD、Shuffle、Broadcast变量）
+   * Keep cleaning RDD, shuffle, and broadcast state. */
   private def keepCleaning(): Unit = Utils.logUncaughtExceptions {
     while (!stopped) {
       try {
@@ -164,7 +166,7 @@ private[spark] class ContextCleaner(sc: SparkContext) extends Logging {
   def doCleanupBroadcast(broadcastId: Long, blocking: Boolean) {
     try {
       logDebug("Cleaning broadcast " + broadcastId)
-      broadcastManager.unbroadcast(broadcastId, true, blocking)
+      broadcastManager.unbroadcast(broadcastId, true, blocking)//清理
       listeners.foreach(_.broadcastCleaned(broadcastId))
       logInfo("Cleaned broadcast " + broadcastId)
     } catch {

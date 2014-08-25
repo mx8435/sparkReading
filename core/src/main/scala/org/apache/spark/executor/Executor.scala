@@ -107,8 +107,14 @@ private[spark] class Executor(
   // Maintains the list of running tasks.
   private val runningTasks = new ConcurrentHashMap[Long, TaskRunner]
 
+  /**
+   * 将task创建成一个TaskRunner，并加入到runningTasks，然后让Executor中的线程池在将来执行该task
+   * @param context
+   * @param taskId
+   * @param serializedTask
+   */
   def launchTask(context: ExecutorBackend, taskId: Long, serializedTask: ByteBuffer) {
-    val tr = new TaskRunner(context, taskId, serializedTask)
+    val tr = new TaskRunner(context, taskId, serializedTask)//创建taskRunner，会反序列化传过来的task
     runningTasks.put(taskId, tr)
     threadPool.execute(tr)
   }

@@ -27,7 +27,7 @@ import org.apache.spark.{Logging, SparkConf, SparkEnv, SparkException}
 import org.apache.spark.storage.{BroadcastBlockId, StorageLevel}
 import org.apache.spark.util.Utils
 
-/**
+/**p2p
  *  A [[org.apache.spark.broadcast.Broadcast]] implementation that uses a BitTorrent-like
  *  protocol to do a distributed transfer of the broadcasted data to the executors.
  *  The mechanism is as follows. The driver divides the serializes the broadcasted data,
@@ -54,7 +54,7 @@ private[spark] class TorrentBroadcast[T: ClassTag](
   val broadcastId = BroadcastBlockId(id)
 
   TorrentBroadcast.synchronized {
-    SparkEnv.get.blockManager.putSingle(
+    SparkEnv.get.blockManager.putSingle(//会先存放到blockManager中
       broadcastId, value_, StorageLevel.MEMORY_AND_DISK, tellMaster = false)
   }
 
@@ -63,7 +63,7 @@ private[spark] class TorrentBroadcast[T: ClassTag](
   @transient var totalBytes = -1
   @transient var hasBlocks = 0
 
-  if (!isLocal) {
+  if (!isLocal) {//不是本地模式的话
     sendBroadcast()
   }
 
@@ -82,13 +82,16 @@ private[spark] class TorrentBroadcast[T: ClassTag](
     TorrentBroadcast.unpersist(id, removeFromDriver = true, blocking)
   }
 
+  /**对广播变量进行分块；
+   * 将bcdata对应的元数据和各数据分块依次存入blockManager
+   */
   def sendBroadcast() {
-    val tInfo = TorrentBroadcast.blockifyObject(value_)
+    val tInfo = TorrentBroadcast.blockifyObject(value_)//分块
     totalBlocks = tInfo.totalBlocks
     totalBytes = tInfo.totalBytes
     hasBlocks = tInfo.totalBlocks
 
-    // Store meta-info
+    // Store meta-info存储元数据至blockManager
     val metaId = BroadcastBlockId(id, "meta")
     val metaInfo = TorrentInfo(null, totalBlocks, totalBytes)
     TorrentBroadcast.synchronized {
@@ -97,11 +100,11 @@ private[spark] class TorrentBroadcast[T: ClassTag](
     }
 
     // Store individual pieces
-    for (i <- 0 until totalBlocks) {
+    for (i <- 0 until totalBlocks) {//依次存入各个dataBlocks到blockManager
       val pieceId = BroadcastBlockId(id, "piece" + i)
       TorrentBroadcast.synchronized {
         SparkEnv.get.blockManager.putSingle(
-          pieceId, tInfo.arrayOfBlocks(i), StorageLevel.MEMORY_AND_DISK, tellMaster = true)
+          pieceId, tInfo.arrayOfBlocks(i), StorageLevel.MEMORY_AND_DISK, tellMaster = true)//通知blockManagerMaster我数据已经存好
       }
     }
   }
@@ -112,22 +115,24 @@ private[spark] class TorrentBroadcast[T: ClassTag](
     out.defaultWriteObject()
   }
 
-  /** Used by the JVM when deserializing this object. */
+  /** 在JVM反序列化task中的广播变量时调用
+   * Used by the JVM when deserializing this object. */
   private def readObject(in: ObjectInputStream) {
     in.defaultReadObject()
     TorrentBroadcast.synchronized {
       SparkEnv.get.blockManager.getSingle(broadcastId) match {
         case Some(x) =>
-          value_ = x.asInstanceOf[T]
+          value_ = x.asInstanceOf[T]//命中，直接返回
 
         case None =>
+          //不命中，则需去读取
           val start = System.nanoTime
           logInfo("Started reading broadcast variable " + id)
 
           // Initialize @transient variables that will receive garbage values from the master.
           resetWorkerVariables()
 
-          if (receiveBroadcast()) {
+          if (receiveBroadcast()) {//需去读取
             value_ = TorrentBroadcast.unBlockifyObject[T](arrayOfBlocks, totalBytes, totalBlocks)
 
             /* Store the merged copy in cache so that the next worker doesn't need to rebuild it.
@@ -159,14 +164,19 @@ private[spark] class TorrentBroadcast[T: ClassTag](
     hasBlocks = 0
   }
 
+  /**
+   *
+   * 获取广播变量：先读取该broadcast变量的元数据，
+   * @return
+   */
   def receiveBroadcast(): Boolean = {
     // Receive meta-info about the size of broadcast data,
     // the number of chunks it is divided into, etc.
     val metaId = BroadcastBlockId(id, "meta")
     var attemptId = 10
-    while (attemptId > 0 && totalBlocks == -1) {
+    while (attemptId > 0 && totalBlocks == -1) {//失败重试
       TorrentBroadcast.synchronized {
-        SparkEnv.get.blockManager.getSingle(metaId) match {
+        SparkEnv.get.blockManager.getSingle(metaId) match {//先读取元数据
           case Some(x) =>
             val tInfo = x.asInstanceOf[TorrentInfo]
             totalBlocks = tInfo.totalBlocks
@@ -175,7 +185,7 @@ private[spark] class TorrentBroadcast[T: ClassTag](
             hasBlocks = 0
 
           case None =>
-            Thread.sleep(500)
+            Thread.sleep(500)//为何要休眠？因为同步？
         }
       }
       attemptId -= 1
@@ -184,12 +194,12 @@ private[spark] class TorrentBroadcast[T: ClassTag](
       return false
     }
 
-    /*
+    /*读取真正的数据块（chunk）
      * Fetch actual chunks of data. Note that all these chunks are stored in
      * the BlockManager and reported to the master, so that other executors
      * can find out and pull the chunks from this executor.
      */
-    val recvOrder = new Random().shuffle(Array.iterate(0, totalBlocks)(_ + 1).toList)
+    val recvOrder = new Random().shuffle(Array.iterate(0, totalBlocks)(_ + 1).toList)//打乱顺序去请求
     for (pid <- recvOrder) {
       val pieceId = BroadcastBlockId(id, "piece" + pid)
       TorrentBroadcast.synchronized {
@@ -211,11 +221,19 @@ private[spark] class TorrentBroadcast[T: ClassTag](
 
 }
 
+/**
+ * TorrentBroadcast的伴生对象
+ */
 private[spark] object TorrentBroadcast extends Logging {
   private lazy val BLOCK_SIZE = conf.getInt("spark.broadcast.blockSize", 4096) * 1024
   private var initialized = false
   private var conf: SparkConf = null
 
+  /**
+   * 初始化，没做什么
+   * @param _isDriver
+   * @param conf
+   */
   def initialize(_isDriver: Boolean, conf: SparkConf) {
     TorrentBroadcast.conf = conf // TODO: we might have to fix it in tests
     synchronized {
@@ -229,33 +247,47 @@ private[spark] object TorrentBroadcast extends Logging {
     initialized = false
   }
 
+  /**
+   * 对广播变量进行分块
+   * @param obj
+   * @tparam T
+   * @return
+   */
   def blockifyObject[T](obj: T): TorrentInfo = {
-    val byteArray = Utils.serialize[T](obj)
+    val byteArray = Utils.serialize[T](obj)//先序列化
     val bais = new ByteArrayInputStream(byteArray)
 
-    var blockNum = byteArray.length / BLOCK_SIZE
-    if (byteArray.length % BLOCK_SIZE != 0) {
+    var blockNum = byteArray.length / BLOCK_SIZE //块数目，一个块默认大小为4M
+    if (byteArray.length % BLOCK_SIZE != 0) {//补齐
       blockNum += 1
     }
 
-    val blocks = new Array[TorrentBlock](blockNum)
+    val blocks = new Array[TorrentBlock](blockNum)//存放对应的所有块
     var blockId = 0
 
-    for (i <- 0 until (byteArray.length, BLOCK_SIZE)) {
-      val thisBlockSize = math.min(BLOCK_SIZE, byteArray.length - i)
+    for (i <- 0 until (byteArray.length, BLOCK_SIZE)) {//对每个块
+      val thisBlockSize = math.min(BLOCK_SIZE, byteArray.length - i)//该块的大小
       val tempByteArray = new Array[Byte](thisBlockSize)
       bais.read(tempByteArray, 0, thisBlockSize)
 
-      blocks(blockId) = new TorrentBlock(blockId, tempByteArray)
+      blocks(blockId) = new TorrentBlock(blockId, tempByteArray)//按顺序编号，并切分相应大小的数据块
       blockId += 1
     }
-    bais.close()
+    bais.close()//关闭流
 
-    val info = TorrentInfo(blocks, blockNum, byteArray.length)
+    val info = TorrentInfo(blocks, blockNum, byteArray.length)//封装
     info.hasBlocks = blockNum
     info
   }
 
+  /**
+   * 对分块进行合并组装并反序列化
+   * @param arrayOfBlocks
+   * @param totalBytes
+   * @param totalBlocks
+   * @tparam T
+   * @return
+   */
   def unBlockifyObject[T](
       arrayOfBlocks: Array[TorrentBlock],
       totalBytes: Int,
