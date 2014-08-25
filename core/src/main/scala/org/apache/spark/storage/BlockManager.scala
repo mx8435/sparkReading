@@ -88,7 +88,7 @@ private[spark] class BlockManager(
   // Max megabytes of data to keep in flight per reducer (to avoid over-allocating memory
   // for receiving shuffle outputs)
   val maxBytesInFlight =
-    conf.getLong("spark.reducer.maxMbInFlight", 48) * 1024 * 1024
+    conf.getLong("spark.reducer.maxMbInFlight", 48) * 1024 * 1024//默认48M
 
   // Whether to compress broadcast variables that are stored
   val compressBroadcast = conf.getBoolean("spark.broadcast.compress", true)
@@ -341,7 +341,7 @@ private[spark] class BlockManager(
     doGetLocal(blockId, asValues = true).asInstanceOf[Option[Iterator[Any]]]
   }
 
-  /**
+  /**使用diskStore去本地找块文件id对应的文件
    * Get block from the local block manager as serialized bytes.
    */
   def getLocalBytes(blockId: BlockId): Option[ByteBuffer] = {
@@ -351,7 +351,7 @@ private[spark] class BlockManager(
     if (blockId.isShuffle) {
       diskStore.getBytes(blockId) match {
         case Some(bytes) =>
-          Some(bytes)
+          Some(bytes)//返回找到的数据
         case None =>
           throw new Exception("Block " + blockId + " not found on disk, though it should be")
       }
@@ -360,25 +360,31 @@ private[spark] class BlockManager(
     }
   }
 
+  /**
+   * 从本地blockManager中获取blockId对应的记录，可能不存在
+   * @param blockId
+   * @param asValues
+   * @return
+   */
   private def doGetLocal(blockId: BlockId, asValues: Boolean): Option[Any] = {
-    val info = blockInfo.get(blockId).orNull
-    if (info != null) {
+    val info = blockInfo.get(blockId).orNull//根据blockInfo判断本地是否有存放blockId对应的数据
+    if (info != null) {//本地blockManager存在该数据
       info.synchronized {
 
         // If another thread is writing the block, wait for it to become ready.
-        if (!info.waitForReady()) {
+        if (!info.waitForReady()) {//如果已经有线程正在等待该数据了，则不能获取
           // If we get here, the block write failed.
           logWarning("Block " + blockId + " was marked as failure.")
           return None
         }
 
-        val level = info.level
+        val level = info.level//获取存储级别
         logDebug("Level for block " + blockId + " is " + level)
 
         // Look for the block in memory
-        if (level.useMemory) {
+        if (level.useMemory) {//采用内存存储
           logDebug("Getting block " + blockId + " from memory")
-          val result = if (asValues) {
+          val result = if (asValues) {//根据要获取的数据类型进行获取
             memoryStore.getValues(blockId)
           } else {
             memoryStore.getBytes(blockId)
@@ -392,7 +398,7 @@ private[spark] class BlockManager(
         }
 
         // Look for the block in Tachyon
-        if (level.useOffHeap) {
+        if (level.useOffHeap) {//存到Tachyon中
           logDebug("Getting block " + blockId + " from tachyon")
           if (tachyonStore.contains(blockId)) {
             tachyonStore.getBytes(blockId) match {
@@ -409,26 +415,27 @@ private[spark] class BlockManager(
           }
         }
 
+        //接下来从磁盘读取，如果采用内存存储级别的话，就将读出来的数据存到内存中
         // Look for block on disk, potentially storing it back into memory if required:
-        if (level.useDisk) {
+        if (level.useDisk) {//存到磁盘中
           logDebug("Getting block " + blockId + " from disk")
-          val bytes: ByteBuffer = diskStore.getBytes(blockId) match {
+          val bytes: ByteBuffer = diskStore.getBytes(blockId) match {//从本地磁盘读取该数据
             case Some(bytes) => bytes
             case None =>
               throw new Exception("Block " + blockId + " not found on disk, though it should be")
           }
           assert (0 == bytes.position())
 
-          if (!level.useMemory) {
+          if (!level.useMemory) {//不能存到内存中，直接返回
             // If the block shouldn't be stored in memory, we can just return it:
             if (asValues) {
               return Some(dataDeserialize(blockId, bytes))
             } else {
               return Some(bytes)
             }
-          } else {
+          } else {//存到内存中
             // Otherwise, we also have to store something in the memory store:
-            if (!level.deserialized || !asValues) {
+            if (!level.deserialized || !asValues) {//如果数据是字节流
               // We'll store the bytes in memory if the block's storage level includes
               // "memory serialized", or if it should be cached as objects in memory
               // but we only requested its serialized bytes:
@@ -439,7 +446,7 @@ private[spark] class BlockManager(
             }
             if (!asValues) {
               return Some(bytes)
-            } else {
+            } else {//如果数据是按值存储的，需反序列化
               val values = dataDeserialize(blockId, bytes)
               if (level.deserialized) {
                 // Cache the values before returning them:
@@ -483,11 +490,11 @@ private[spark] class BlockManager(
 
   private def doGetRemote(blockId: BlockId, asValues: Boolean): Option[Any] = {
     require(blockId != null, "BlockId is null")
-    val locations = Random.shuffle(master.getLocations(blockId))
+    val locations = Random.shuffle(master.getLocations(blockId))//从blockManagerMaster中获取blockId对应的存放位置
     for (loc <- locations) {
       logDebug("Getting remote block " + blockId + " from " + loc)
       val data = BlockManagerWorker.syncGetBlock(
-        GetBlock(blockId), ConnectionManagerId(loc.host, loc.port))
+        GetBlock(blockId), ConnectionManagerId(loc.host, loc.port))//
       if (data != null) {
         if (asValues) {
           return Some(dataDeserialize(blockId, data))
@@ -501,15 +508,16 @@ private[spark] class BlockManager(
     None
   }
 
-  /**
+  /**从本地或其他节点的blockManager中获取该blockId对应的记录数据
    * Get a block from the block manager (either local or remote).
    */
   def get(blockId: BlockId): Option[Iterator[Any]] = {
     val local = getLocal(blockId)
-    if (local.isDefined) {
+    if (local.isDefined) {//如果该记录在本地有存放，就直接返回对应的数据
       logInfo("Found block %s locally".format(blockId))
       return local
     }
+    //否则需要从其他节点那获取数据
     val remote = getRemote(blockId)
     if (remote.isDefined) {
       logInfo("Found block %s remotely".format(blockId))
@@ -518,7 +526,8 @@ private[spark] class BlockManager(
     None
   }
 
-  /**
+  /**根据给定的blocksByAddress块地址信息，创建BlockFetcherIterator用于获取这些ShuffleOutput文件块信息
+   * 根据BlockManagerIds去从本地或远程地点获取多个block，返回(block ID, value)使得客户端可以pipeline式的处理block
    * Get multiple blocks from local and remote block manager using their BlockManagerIds. Returns
    * an Iterator of (block ID, value) pairs so that clients may handle blocks in a pipelined
    * fashion as they're received. Expects a size in bytes to be provided for each block fetched,
@@ -561,7 +570,7 @@ private[spark] class BlockManager(
     new DiskBlockObjectWriter(blockId, file, serializer, bufferSize, compressStream, syncWrites)
   }
 
-  /**
+  /**将一个分区记录放到blockManager
    * Put a new block of values to the block manager. Return a list of blocks updated as a
    * result of this put.
    */
@@ -574,7 +583,7 @@ private[spark] class BlockManager(
     doPut(blockId, ArrayBufferValues(values), level, tellMaster)
   }
 
-  /**
+  /**将序列化的数据存到本地blockManager并返回存储的位置信息
    * Put a new block of serialized bytes to the block manager. Return a list of blocks updated
    * as a result of this put.
    */
@@ -587,6 +596,14 @@ private[spark] class BlockManager(
     doPut(blockId, ByteBufferValues(bytes), level, tellMaster)
   }
 
+  /**
+   * 将分区记录存放到内存中
+   * @param blockId
+   * @param data
+   * @param level
+   * @param tellMaster
+   * @return
+   */
   private def doPut(
       blockId: BlockId,
       data: Values,
@@ -608,7 +625,7 @@ private[spark] class BlockManager(
       val oldBlockOpt = blockInfo.putIfAbsent(blockId, tinfo)
 
       if (oldBlockOpt.isDefined) {
-        if (oldBlockOpt.get.waitForReady()) {
+        if (oldBlockOpt.get.waitForReady()) {//该分区数据已经存在，不需要再重复放到内存中
           logWarning("Block " + blockId + " already exists on this machine; not re-adding it")
           return updatedBlocks
         }
@@ -641,7 +658,7 @@ private[spark] class BlockManager(
       // Duplicate doesn't copy the bytes, just creates a wrapper
       val bufferView = data.asInstanceOf[ByteBufferValues].buffer.duplicate()
       Future {
-        replicate(blockId, bufferView, level)
+        replicate(blockId, bufferView, level)//有进行备份
       }
     } else {
       null
@@ -653,10 +670,10 @@ private[spark] class BlockManager(
 
       var marked = false
       try {
-        if (level.useMemory) {
+        if (level.useMemory) {//优先存到内存中，如果内存不足了再存到disk
           // Save it just to memory first, even if it also has useDisk set to true; we will
           // drop it to disk later if the memory store can't hold it.
-          val res = data match {
+          val res = data match {//根据数据的类型进行存储到memoryStore中的LinkedHashMap中
             case IteratorValues(iterator) =>
               memoryStore.putValues(blockId, iterator, level, true)
             case ArrayBufferValues(array) =>
@@ -672,7 +689,7 @@ private[spark] class BlockManager(
           }
           // Keep track of which blocks are dropped from memory
           res.droppedBlocks.foreach { block => updatedBlocks += block }
-        } else if (level.useOffHeap) {
+        } else if (level.useOffHeap) {//存到tachyon的OffHeap中
           // Save to Tachyon.
           val res = data match {
             case IteratorValues(iterator) =>
@@ -688,12 +705,12 @@ private[spark] class BlockManager(
             case Right(newBytes) => bytesAfterPut = newBytes
             case _ =>
           }
-        } else {
+        } else {//直接存到磁盘
           // Save directly to disk.
           // Don't get back the bytes unless we replicate them.
           val askForBytes = level.replication > 1
 
-          val res = data match {
+          val res = data match {//根据数据的类型进行存储
             case IteratorValues(iterator) =>
               diskStore.putValues(blockId, iterator, level, askForBytes)
             case ArrayBufferValues(array) =>
@@ -702,7 +719,7 @@ private[spark] class BlockManager(
               bytes.rewind()
               diskStore.putBytes(blockId, bytes, level)
           }
-          size = res.size
+          size = res.size//存储的统计
           res.data match {
             case Right(newBytes) => bytesAfterPut = newBytes
             case _ =>
@@ -736,7 +753,7 @@ private[spark] class BlockManager(
 
     // Either we're storing bytes and we asynchronously started replication, or we're storing
     // values and need to serialize and replicate them now:
-    if (level.replication > 1) {
+    if (level.replication > 1) {//需要备份
       data match {
         case ByteBufferValues(bytes) => Await.ready(replicationFuture, Duration.Inf)
         case _ => {
@@ -813,12 +830,13 @@ private[spark] class BlockManager(
   }
 
   /**
+   * 当内存使用达到阈值时，调用该方法从内存中剔除掉一个分区，腾出足够的空间。当存储级别中有指定可以存到磁盘，会将drop的数据存到磁盘
    * Drop a block from memory, possibly putting it on disk if applicable. Called when the memory
    * store reaches its limit and needs to free up space.
    *
    * Return the block status if the given block has been updated, else None.
    */
-  def dropFromMemory(
+  def dropFromMemory(//这边是将blockId和data存到磁盘？？？？？而不是从LinkedHashMap中腾出数据存到磁盘？？？
       blockId: BlockId,
       data: Either[ArrayBuffer[Any], ByteBuffer]): Option[BlockStatus] = {
 
@@ -840,30 +858,31 @@ private[spark] class BlockManager(
         val level = info.level
 
         // Drop to disk, if storage level requires
-        if (level.useDisk && !diskStore.contains(blockId)) {
+        if (level.useDisk && !diskStore.contains(blockId)) {//如果存储级别中有指定可以存到磁盘，会将drop的数据存到磁盘
           logInfo("Writing block " + blockId + " to disk")
-          data match {
+          data match {//根据数据是否序列化，存到磁盘不同的地方
             case Left(elements) =>
               diskStore.putValues(blockId, elements, level, false)
             case Right(bytes) =>
               diskStore.putBytes(blockId, bytes, level)
           }
-          blockIsUpdated = true
+          blockIsUpdated = true//更新成功
         }
 
         // Actually drop from memory store
+        //此时可以将blockId对应的数据剔除
         val droppedMemorySize =
           if (memoryStore.contains(blockId)) memoryStore.getSize(blockId) else 0L
         val blockIsRemoved = memoryStore.remove(blockId)
         if (blockIsRemoved) {
-          blockIsUpdated = true
+          blockIsUpdated = true//剔除成功
         } else {
           logWarning("Block " + blockId + " could not be dropped from memory as it does not exist")
         }
 
         val status = getCurrentBlockStatus(blockId, info)
         if (info.tellMaster) {
-          reportBlockStatus(blockId, info, status, droppedMemorySize)
+          reportBlockStatus(blockId, info, status, droppedMemorySize)//向master更新当前块更新情况
         }
         if (!level.useDisk) {
           // The block is completely gone from this node; forget it so we can put() it again later.

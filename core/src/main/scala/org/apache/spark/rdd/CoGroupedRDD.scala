@@ -141,13 +141,13 @@ class CoGroupedRDD[K](@transient var rdds: Seq[RDD[_ <: Product2[K, _]]], part: 
         val fetcher = SparkEnv.get.shuffleFetcher
         val ser = Serializer.getSerializer(serializer)
         val it = fetcher.fetch[Product2[K, Any]](shuffleId, split.index, context, ser)
-        rddIterators += ((it, depNum))
+        rddIterators += ((it, depNum))//获取所有Shuffle输出对应的Iterator和依赖号dep Num
     }
 
-    if (!externalSorting) {
+    if (!externalSorting) {//全在内存中进行，采用AppendOnlyMap
       val map = new AppendOnlyMap[K, CoGroupCombiner]
       val update: (Boolean, CoGroupCombiner) => CoGroupCombiner = (hadVal, oldVal) => {
-        if (hadVal) oldVal else Array.fill(numRdds)(new CoGroup)
+        if (hadVal) oldVal else Array.fill(numRdds)(new CoGroup)//如果已经存在该值，就将返回oldValues，否则新生成
       }
       val getCombiner: K => CoGroupCombiner = key => {
         map.changeValue(key, update)

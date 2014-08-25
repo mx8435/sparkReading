@@ -75,7 +75,7 @@ class PairRDDFunctions[K, V](self: RDD[(K, V)])
       mergeValue: (C, V) => C,
       mergeCombiners: (C, C) => C,
       partitioner: Partitioner,
-      mapSideCombine: Boolean = true,
+      mapSideCombine: Boolean = true,//默认开启mapSideCombine
       serializer: Serializer = null): RDD[(K, C)] = {
     require(mergeCombiners != null, "mergeCombiners must be defined") // required as of Spark 0.9.0
     if (keyClass.isArray) {
@@ -92,6 +92,7 @@ class PairRDDFunctions[K, V](self: RDD[(K, V)])
         new InterruptibleIterator(context, aggregator.combineValuesByKey(iter, context))
       }, preservesPartitioning = true)
     } else if (mapSideCombine) {
+      //先进行combine，再根据combine结果生成ShuffleRDD
       val combined = self.mapPartitionsWithContext((context, iter) => {
         aggregator.combineValuesByKey(iter, context)
       }, preservesPartitioning = true)
@@ -102,6 +103,7 @@ class PairRDDFunctions[K, V](self: RDD[(K, V)])
       }, preservesPartitioning = true)
     } else {
       // Don't apply map-side combiner.
+      //不进行combine，直接先生成ShuffleRDD,然后再进行mapSideCombine,生成MapPartitionsRdd
       val values = new ShuffledRDD[K, V, (K, V)](self, partitioner).setSerializer(serializer)
       values.mapPartitionsWithContext((context, iter) => {
         new InterruptibleIterator(context, aggregator.combineValuesByKey(iter, context))
@@ -275,7 +277,7 @@ class PairRDDFunctions[K, V](self: RDD[(K, V)])
     // into a hash table, leading to more objects in the old gen.
     def createCombiner(v: V) = ArrayBuffer(v)
     def mergeValue(buf: ArrayBuffer[V], v: V) = buf += v
-    def mergeCombiners(c1: ArrayBuffer[V], c2: ArrayBuffer[V]) = c1 ++ c2
+    def mergeCombiners(c1: ArrayBuffer[V], c2: ArrayBuffer[V]) = c1 ++ c2//func函数，res=res++record.value
     val bufs = combineByKey[ArrayBuffer[V]](
       createCombiner _, mergeValue _, mergeCombiners _, partitioner, mapSideCombine=false)
     bufs.mapValues(_.toIterable)

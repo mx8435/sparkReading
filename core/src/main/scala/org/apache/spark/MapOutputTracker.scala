@@ -116,7 +116,7 @@ private[spark] abstract class MapOutputTracker(conf: SparkConf) extends Logging 
     }
   }
 
-  /**
+  /**获取shuffleId和reduceId对应的Map输出的数据所在的blockManagerId(URIs)和数据对应的大小
    * Called from executors to get the server URIs and output sizes of the map outputs of
    * a given shuffle.
    */
@@ -360,9 +360,11 @@ private[spark] object MapOutputTracker {
     objIn.readObject().asInstanceOf[Array[MapStatus]]
   }
 
-  // Convert an array of MapStatuses to locations and sizes for a given reduce ID. If
-  // any of the statuses is null (indicating a missing location due to a failed mapper),
-  // throw a FetchFailedException.
+  /**根据给定的reduceId和stageId可以得到该对应的ShuffleMap Output。会将找到的MapStatus转换成对应的节点位置BlockManagerId和大小compressedSizes
+   * Convert an array of MapStatuses to locations and sizes for a given reduce ID. If
+  * any of the statuses is null (indicating a missing location due to a failed mapper),
+  * throw a FetchFailedException.
+  */
   private def convertMapStatuses(
         shuffleId: Int,
         reduceId: Int,
@@ -374,7 +376,7 @@ private[spark] object MapOutputTracker {
           throw new FetchFailedException(null, shuffleId, -1, reduceId,
             new Exception("Missing an output location for shuffle " + shuffleId))
         } else {
-          (status.location, decompressSize(status.compressedSizes(reduceId)))
+          (status.location, decompressSize(status.compressedSizes(reduceId)))//转换成位置信息和数据大小
         }
     }
   }

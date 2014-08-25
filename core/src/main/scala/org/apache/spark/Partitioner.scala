@@ -72,9 +72,14 @@ object Partitioner {
 class HashPartitioner(partitions: Int) extends Partitioner {
   def numPartitions = partitions
 
+  /**
+   * 获取bucketId。即取模运算
+   * @param key
+   * @return
+   */
   def getPartition(key: Any): Int = key match {
     case null => 0
-    case _ => Utils.nonNegativeMod(key.hashCode, numPartitions)
+    case _ => Utils.nonNegativeMod(key.hashCode, numPartitions)//是对key的hashCode进行取模
   }
 
   override def equals(other: Any): Boolean = other match {

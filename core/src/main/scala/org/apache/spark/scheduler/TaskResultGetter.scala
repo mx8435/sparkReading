@@ -40,17 +40,23 @@ private[spark] class TaskResultGetter(sparkEnv: SparkEnv, scheduler: TaskSchedul
     }
   }
 
+  /**
+   * 获取成功执行的task的输出数据
+   * @param taskSetManager
+   * @param tid
+   * @param serializedData
+   */
   def enqueueSuccessfulTask(
     taskSetManager: TaskSetManager, tid: Long, serializedData: ByteBuffer) {
     getTaskResultExecutor.execute(new Runnable {
       override def run(): Unit = Utils.logUncaughtExceptions {
         try {
           val result = serializer.get().deserialize[TaskResult[_]](serializedData) match {
-            case directResult: DirectTaskResult[_] => directResult
+            case directResult: DirectTaskResult[_] => directResult//若是直接的结果，则这个就是数据
             case IndirectTaskResult(blockId) =>
-              logDebug("Fetching indirect task result for TID %s".format(tid))
+              logDebug("Fetching indirect task result for TID %s".format(tid))//如果是间接的，需要再去获取输出数据
               scheduler.handleTaskGettingResult(taskSetManager, tid)
-              val serializedTaskResult = sparkEnv.blockManager.getRemoteBytes(blockId)
+              val serializedTaskResult = sparkEnv.blockManager.getRemoteBytes(blockId)//获取远程的数据
               if (!serializedTaskResult.isDefined) {
                 /* We won't be able to get the task result if the machine that ran the task failed
                  * between when the task ended and when we tried to fetch the result, or if the
@@ -60,8 +66,8 @@ private[spark] class TaskResultGetter(sparkEnv: SparkEnv, scheduler: TaskSchedul
                 return
               }
               val deserializedResult = serializer.get().deserialize[DirectTaskResult[_]](
-                serializedTaskResult.get)
-              sparkEnv.blockManager.master.removeBlock(blockId)
+                serializedTaskResult.get)//对得到的数据进行反序列化
+              sparkEnv.blockManager.master.removeBlock(blockId)//移除该该数据块，因为数据已经获取了
               deserializedResult
           }
           result.metrics.resultSize = serializedData.limit()

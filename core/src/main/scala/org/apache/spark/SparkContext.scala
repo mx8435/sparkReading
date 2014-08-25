@@ -1049,7 +1049,7 @@ class SparkContext(config: SparkConf) extends Logging {
     dagScheduler.runJob(rdd, cleanedFunc, partitions, callSite, allowLocal,
       resultHandler, localProperties.get)//调用DAGScheduler执行该job
     logInfo("Job finished: " + callSite + ", took " + (System.nanoTime - start) / 1e9 + " s")
-    rdd.doCheckpoint()
+    rdd.doCheckpoint()//检查是否有RDD需要checkpoint
   }
 
   /**
@@ -1185,7 +1185,7 @@ class SparkContext(config: SparkConf) extends Logging {
     dagScheduler.cancelStage(stageId)
   }
 
-  /**
+  /**清理一个闭包，使之可序列化
    * Clean a closure to make it ready to serialized and send to tasks
    * (removes unreferenced variables in $outer's, updates REPL variables)
    */

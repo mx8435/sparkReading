@@ -49,13 +49,13 @@ private[spark] class DiskBlockManager(shuffleManager: ShuffleBlockManager, rootD
 
   addShutdownHook()
 
-  /**
+  /**返回blockId对应的物理文件块在本地的位置：如果采用了consolidateShuffleFiles，则还需要shuffleManager来提供文件位置信息
    * Returns the physical file segment in which the given BlockId is located.
    * If the BlockId has been mapped to a specific FileSegment, that will be returned.
    * Otherwise, we assume the Block is mapped to a whole file identified by the BlockId directly.
    */
   def getBlockLocation(blockId: BlockId): FileSegment = {
-    if (blockId.isShuffle && shuffleManager.consolidateShuffleFiles) {
+    if (blockId.isShuffle && shuffleManager.consolidateShuffleFiles) {//如果采用了consolidateShuffleFiles，则还需要shuffleManager来提供文件位置信息
       shuffleManager.getBlockLocation(blockId.asInstanceOf[ShuffleBlockId])
     } else {
       val file = getFile(blockId.name)
@@ -63,6 +63,11 @@ private[spark] class DiskBlockManager(shuffleManager: ShuffleBlockManager, rootD
     }
   }
 
+  /**
+   * 根据文件名创建并返回一个文件
+   * @param filename
+   * @return
+   */
   def getFile(filename: String): File = {
     // Figure out which local directory it hashes to, and which subdirectory in that
     val hash = Utils.nonNegativeHash(filename)

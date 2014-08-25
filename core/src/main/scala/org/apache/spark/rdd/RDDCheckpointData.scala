@@ -33,7 +33,7 @@ private[spark] object CheckpointState extends Enumeration {
   val Initialized, MarkedForCheckpoint, CheckpointingInProgress, Checkpointed = Value
 }
 
-/**
+/**该类用于管理所有需要checkpoint的RDD。
  * This class contains all the information related to RDD checkpointing. Each instance of this
  * class is associated with a RDD. It manages process of checkpointing of the associated RDD,
  * as well as, manages the post-checkpoint state by providing the updated partitions,
@@ -70,7 +70,9 @@ private[spark] class RDDCheckpointData[T: ClassTag](@transient rdd: RDD[T])
     RDDCheckpointData.synchronized { cpFile }
   }
 
-  // Do the checkpointing of the RDD. Called after the first job using that RDD is over.
+  /** Do the checkpointing of the RDD. Called after the first job using that RDD is over.
+    * 执行ckpt:先创建ckpt的存储目录，然后专门开启一个job来执行ckpt，标记为ckpted，清除依赖
+    */
   def doCheckpoint() {
     // If it is marked for checkpointing AND checkpointing is not already in progress,
     // then set it to be in progress, else return
@@ -82,7 +84,7 @@ private[spark] class RDDCheckpointData[T: ClassTag](@transient rdd: RDD[T])
       }
     }
 
-    // Create the output path for the checkpoint
+    // Create the output path for the checkpoint创建ckpt的存储目录
     val path = new Path(rdd.context.checkpointDir.get, "rdd-" + rdd.id)
     val fs = path.getFileSystem(rdd.context.hadoopConfiguration)
     if (!fs.mkdirs(path)) {
@@ -91,8 +93,8 @@ private[spark] class RDDCheckpointData[T: ClassTag](@transient rdd: RDD[T])
 
     // Save to file, and reload it as an RDD
     val broadcastedConf = rdd.context.broadcast(
-      new SerializableWritable(rdd.context.hadoopConfiguration))
-    rdd.context.runJob(rdd, CheckpointRDD.writeToFile[T](path.toString, broadcastedConf) _)
+      new SerializableWritable(rdd.context.hadoopConfiguration))//获取配置文件
+    rdd.context.runJob(rdd, CheckpointRDD.writeToFile[T](path.toString, broadcastedConf) _)//专门开启一个job来执行ckpt
     val newRDD = new CheckpointRDD[T](rdd.context, path.toString)
     if (newRDD.partitions.size != rdd.partitions.size) {
       throw new SparkException(
@@ -106,7 +108,7 @@ private[spark] class RDDCheckpointData[T: ClassTag](@transient rdd: RDD[T])
       cpRDD = Some(newRDD)
       rdd.markCheckpointed(newRDD)   // Update the RDD's dependencies and partitions
       cpState = Checkpointed
-      RDDCheckpointData.clearTaskCaches()
+      RDDCheckpointData.clearTaskCaches()//清除掉该RDD的依赖关系。
     }
     logInfo("Done checkpointing RDD " + rdd.id + " to " + path + ", new parent is RDD " + newRDD.id)
   }

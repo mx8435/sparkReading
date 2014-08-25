@@ -33,15 +33,21 @@ private[spark] class BlockManagerWorker(val blockManager: BlockManager) extends 
 
   blockManager.connectionManager.onReceiveMessage(onBlockMessageReceive)
 
+  /**
+   * 接收到块请求消息时
+   * @param msg
+   * @param id
+   * @return
+   */
   def onBlockMessageReceive(msg: Message, id: ConnectionManagerId): Option[Message] = {
     logDebug("Handling message " + msg)
     msg match {
       case bufferMessage: BufferMessage => {
         try {
           logDebug("Handling as a buffer message " + bufferMessage)
-          val blockMessages = BlockMessageArray.fromBufferMessage(bufferMessage)
+          val blockMessages = BlockMessageArray.fromBufferMessage(bufferMessage)//获取所有的请求消息
           logDebug("Parsed as a block message array")
-          val responseMessages = blockMessages.map(processBlockMessage).filter(_ != None).map(_.get)
+          val responseMessages = blockMessages.map(processBlockMessage).filter(_ != None).map(_.get)//调用processBlockMessage对每个消息进行处理，并获得响应消息
           Some(new BlockMessageArray(responseMessages).toBufferMessage)
         } catch {
           case e: Exception => logError("Exception handling buffer message", e)
@@ -55,6 +61,11 @@ private[spark] class BlockManagerWorker(val blockManager: BlockManager) extends 
     }
   }
 
+  /**
+   * 处理块消息{TYPE_PUT_BLOCK,TYPE_GET_BLOCK}
+   * @param blockMessage
+   * @return
+   */
   def processBlockMessage(blockMessage: BlockMessage): Option[BlockMessage] = {
     blockMessage.getType match {
       case BlockMessage.TYPE_PUT_BLOCK => {
@@ -66,11 +77,11 @@ private[spark] class BlockManagerWorker(val blockManager: BlockManager) extends 
       case BlockMessage.TYPE_GET_BLOCK => {
         val gB = new GetBlock(blockMessage.getId)
         logDebug("Received [" + gB + "]")
-        val buffer = getBlock(gB.id)
+        val buffer = getBlock(gB.id)//获取所求的文件块数据
         if (buffer == null) {
           return None
         }
-        Some(BlockMessage.fromGotBlock(GotBlock(gB.id, buffer)))
+        Some(BlockMessage.fromGotBlock(GotBlock(gB.id, buffer)))//将数据封装成包，回送该数据
       }
       case _ => None
     }
@@ -84,6 +95,11 @@ private[spark] class BlockManagerWorker(val blockManager: BlockManager) extends 
         + " with data size: " + bytes.limit)
   }
 
+  /**
+   * 使用blockManager得到blockId对应的文件，返回该数据
+   * @param id
+   * @return
+   */
   private def getBlock(id: BlockId): ByteBuffer = {
     val startTimeMs = System.currentTimeMillis()
     logDebug("GetBlock " + id + " started from " + startTimeMs)
@@ -104,6 +120,12 @@ private[spark] object BlockManagerWorker extends Logging {
     blockManagerWorker = new BlockManagerWorker(manager)
   }
 
+  /**
+   * 将数据放进blockManager中
+   * @param msg
+   * @param toConnManagerId
+   * @return
+   */
   def syncPutBlock(msg: PutBlock, toConnManagerId: ConnectionManagerId): Boolean = {
     val blockManager = blockManagerWorker.blockManager
     val connectionManager = blockManager.connectionManager
@@ -114,6 +136,12 @@ private[spark] object BlockManagerWorker extends Logging {
     resultMessage.isDefined
   }
 
+  /**
+   * 取出数据
+   * @param msg
+   * @param toConnManagerId
+   * @return
+   */
   def syncGetBlock(msg: GetBlock, toConnManagerId: ConnectionManagerId): ByteBuffer = {
     val blockManager = blockManagerWorker.blockManager
     val connectionManager = blockManager.connectionManager
@@ -121,17 +149,17 @@ private[spark] object BlockManagerWorker extends Logging {
     val blockMessageArray = new BlockMessageArray(blockMessage)
     val responseMessage = connectionManager.sendMessageReliablySync(
         toConnManagerId, blockMessageArray.toBufferMessage)
-    responseMessage match {
+    responseMessage match {//根据响应信息responseMessage匹配
       case Some(message) => {
         val bufferMessage = message.asInstanceOf[BufferMessage]
         logDebug("Response message received " + bufferMessage)
         BlockMessageArray.fromBufferMessage(bufferMessage).foreach(blockMessage => {
             logDebug("Found " + blockMessage)
-            return blockMessage.getData
+            return blockMessage.getData//返回数据
           })
       }
       case None => logDebug("No response message received")
     }
-    null
+    null//没找到
   }
 }

@@ -71,9 +71,10 @@ class BlockManagerMaster(var driverActor: ActorRef, conf: SparkConf) extends Log
     res
   }
 
-  /** Get locations of the blockId from the driver */
+  /**向driver询问blockId对应的分区数据的存放位置
+   *  Get locations of the blockId from the driver */
   def getLocations(blockId: BlockId): Seq[BlockManagerId] = {
-    askDriverWithReply[Seq[BlockManagerId]](GetLocations(blockId))
+    askDriverWithReply[Seq[BlockManagerId]](GetLocations(blockId))//发送请求blockId对应的分区数据的GetLocations事件
   }
 
   /** Get locations of multiple blockIds from the driver */
@@ -218,7 +219,7 @@ class BlockManagerMaster(var driverActor: ActorRef, conf: SparkConf) extends Log
     }
   }
 
-  /**
+  /**向driver发送消息
    * Send a message to the driver actor and get its result within a default timeout, or
    * throw a SparkException if this fails.
    */
@@ -230,11 +231,11 @@ class BlockManagerMaster(var driverActor: ActorRef, conf: SparkConf) extends Log
     }
     var attempts = 0
     var lastException: Exception = null
-    while (attempts < AKKA_RETRY_ATTEMPTS) {
+    while (attempts < AKKA_RETRY_ATTEMPTS) {//失败尝试
       attempts += 1
       try {
         val future = driverActor.ask(message)(timeout)
-        val result = Await.result(future, timeout)
+        val result = Await.result(future, timeout)//获取返回数据
         if (result == null) {
           throw new SparkException("BlockManagerMaster returned null")
         }

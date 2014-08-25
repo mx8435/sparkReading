@@ -88,7 +88,8 @@ private[spark] class SizeTrackingAppendOnlyMap[K, V] extends AppendOnlyMap[K, V]
     resetSamples()
   }
 
-  /** Estimates the current size of the map in bytes. O(1) time. */
+  /** O(1)时间估算当前AppendOnlyMap占用的内存空间，根据每次insert-aggregate record后result的变化情况和insert的record数目来估计
+   *  Estimates the current size of the map in bytes. O(1) time. */
   def estimateSize(): Long = {
     assert(samples.nonEmpty)
     val extrapolatedDelta = bytesPerUpdate * (numUpdates - samples.last.numUpdates)

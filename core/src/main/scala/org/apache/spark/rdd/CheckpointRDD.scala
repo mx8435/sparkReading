@@ -84,6 +84,16 @@ private[spark] object CheckpointRDD extends Logging {
     "part-%05d".format(splitId)
   }
 
+  /**
+   * 在broadcastedConf指定的文件系统上创建输出目录
+   * @param path
+   * @param broadcastedConf
+   * @param blockSize
+   * @param ctx
+   * @param iterator
+   * @tparam T
+   * @return
+   */
   def writeToFile[T: ClassTag](
       path: String,
       broadcastedConf: Broadcast[SerializableWritable[Configuration]],
@@ -104,7 +114,7 @@ private[spark] object CheckpointRDD extends Logging {
     val bufferSize = env.conf.getInt("spark.buffer.size", 65536)
 
     val fileOutputStream = if (blockSize < 0) {
-      fs.create(tempOutputPath, false, bufferSize)
+      fs.create(tempOutputPath, false, bufferSize)//创建临时输出目录
     } else {
       // This is mainly for testing purpose
       fs.create(tempOutputPath, false, bufferSize, fs.getDefaultReplication, blockSize)
@@ -114,7 +124,7 @@ private[spark] object CheckpointRDD extends Logging {
     serializeStream.writeAll(iterator)
     serializeStream.close()
 
-    if (!fs.rename(tempOutputPath, finalOutputPath)) {
+    if (!fs.rename(tempOutputPath, finalOutputPath)) {//重命名为finalOutputPath
       if (!fs.exists(finalOutputPath)) {
         logInfo("Deleting tempOutputPath " + tempOutputPath)
         fs.delete(tempOutputPath, false)

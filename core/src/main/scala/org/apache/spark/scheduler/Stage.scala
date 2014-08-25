@@ -60,6 +60,11 @@ private[spark] class Stage(
     }
   }
 
+  /**
+   * 保存输出ShuffleOutput的存储位置？？？在stage中，不是在mapOutputTracker中？
+   * @param partition
+   * @param status
+   */
   def addOutputLoc(partition: Int, status: MapStatus) {
     val prevList = outputLocs(partition)
     outputLocs(partition) = status :: prevList

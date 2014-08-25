@@ -696,6 +696,7 @@ class DAGScheduler(
     try {
       // New stage creation may throw an exception if, for example, jobs are run on a
       // HadoopRDD whose underlying HDFS files have been deleted.
+      //由后往前创建stage，resultStage不需要Shuffle，故第三个参数为None，不是shuffle依赖
       finalStage = newStage(finalRDD, partitions.size, None, jobId, Some(callSite))//创建根据该rdd创建final Stage
     } catch {
       case e: Exception =>
@@ -819,7 +820,8 @@ class DAGScheduler(
     }
   }
 
-  /**
+  /**针对task的成功执行做出相应：如果当前task中存在其他失效的task，则需重新执行本stage；同时也会将waitting queue中所有准备就绪的stage
+    * 加入到running queue中，以便执行
    * Responds to a task finishing. This is called inside the event loop so it assumes that it can
    * modify the scheduler's internal state. Use taskEnded() to post a task end event from outside.
    */
@@ -852,7 +854,7 @@ class DAGScheduler(
           Accumulators.add(event.accumUpdates) // TODO: do this only if task wasn't resubmitted
         }
         pendingTasks(stage) -= task
-        task match {
+        task match {//匹配任务的类型，是ShuffleMapTask还是ResultTask
           case rt: ResultTask[_, _] =>
             resultStageToJob.get(stage) match {
               case Some(job) =>
@@ -860,10 +862,10 @@ class DAGScheduler(
                   job.finished(rt.outputId) = true
                   job.numFinished += 1
                   // If the whole job has finished, remove it
-                  if (job.numFinished == job.numPartitions) {
-                    markStageAsFinished(stage)
+                  if (job.numFinished == job.numPartitions) {//如果该job对应的partitions均已生成，则表示整个job成功了
+                    markStageAsFinished(stage)//标记为结束
                     cleanupStateForJobAndIndependentStages(job, Some(stage))
-                    listenerBus.post(SparkListenerJobEnd(job.jobId, JobSucceeded))
+                    listenerBus.post(SparkListenerJobEnd(job.jobId, JobSucceeded))//???
                   }
                   job.listener.taskSucceeded(rt.outputId, event.result)
                 }
@@ -878,9 +880,9 @@ class DAGScheduler(
             if (failedEpoch.contains(execId) && smt.epoch <= failedEpoch(execId)) {
               logInfo("Ignoring possibly bogus ShuffleMapTask completion from " + execId)
             } else {
-              stage.addOutputLoc(smt.partitionId, status)
+              stage.addOutputLoc(smt.partitionId, status)//将输出位置
             }
-            if (runningStages.contains(stage) && pendingTasks(stage).isEmpty) {
+            if (runningStages.contains(stage) && pendingTasks(stage).isEmpty) {//如果当前stage中所有的task均已执行成功【注意，reduceTask要fetch结果需等到stage结束后才行】
               markStageAsFinished(stage)
               logInfo("looking for newly runnable stages")
               logInfo("running: " + runningStages)
@@ -893,29 +895,29 @@ class DAGScheduler(
                 // epoch incremented to refetch them.
                 // TODO: Only increment the epoch number if this is not the first time
                 //       we registered these map outputs.
-                mapOutputTracker.registerMapOutputs(
+                mapOutputTracker.registerMapOutputs(//向mapOutputTracker注册该map输出。
                   stage.shuffleDep.get.shuffleId,
                   stage.outputLocs.map(list => if (list.isEmpty) null else list.head).toArray,
                   changeEpoch = true)
               }
               clearCacheLocs()
-              if (stage.outputLocs.exists(_ == Nil)) {
+              if (stage.outputLocs.exists(_ == Nil)) {//stage中存在部分失败的tasks（这些task的mapOutput输出位置不存在），需重新提交该stage
                 // Some tasks had failed; let's resubmit this stage
                 // TODO: Lower-level scheduler should also deal with this
                 logInfo("Resubmitting " + stage + " (" + stage.name +
                   ") because some of its tasks had failed: " +
                   stage.outputLocs.zipWithIndex.filter(_._1 == Nil).map(_._2).mkString(", "))
-                submitStage(stage)
-              } else {
+                submitStage(stage)//重新提交该stage
+              } else {//当前所有tasks都执行成功
                 val newlyRunnable = new ArrayBuffer[Stage]
                 for (stage <- waitingStages) {
                   logInfo("Missing parents for " + stage + ": " + getMissingParentStages(stage))
                 }
-                for (stage <- waitingStages if getMissingParentStages(stage) == Nil) {
+                for (stage <- waitingStages if getMissingParentStages(stage) == Nil) {//从等待队列中找出所有准备就绪可以执行的stage
                   newlyRunnable += stage
                 }
                 waitingStages --= newlyRunnable
-                runningStages ++= newlyRunnable
+                runningStages ++= newlyRunnable//将这些可执行的stage加入到执行
                 for {
                   stage <- newlyRunnable.sortBy(_.id)
                   jobId <- activeJobForStage(stage)

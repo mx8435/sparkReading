@@ -49,6 +49,11 @@ private[spark] class JobWaiter[T](
     dagScheduler.cancelJob(jobId)
   }
 
+  /**
+   * 更新jobWaiter，使之可以唤醒阻塞在dagScheduler.runJob中等待该任务结束的jobWaiter
+   * @param index
+   * @param result
+   */
   override def taskSucceeded(index: Int, result: Any): Unit = synchronized {
     if (_jobFinished) {
       throw new UnsupportedOperationException("taskSucceeded() called on a finished JobWaiter")

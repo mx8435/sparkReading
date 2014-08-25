@@ -127,6 +127,7 @@ class ExternalAppendOnlyMap[K, V, C](
 
       // Atomically check whether there is sufficient memory in the global pool for
       // this map to grow and, if possible, allocate the required amount
+      //检查全局池中是否有足够的内存够该map用，如果够就分配给该map，否则spill到磁盘
       shuffleMemoryMap.synchronized {
         val threadId = Thread.currentThread().getId
         val previouslyOccupiedMemory = shuffleMemoryMap.get(threadId)
@@ -135,13 +136,13 @@ class ExternalAppendOnlyMap[K, V, C](
 
         // Assume map growth factor is 2x
         shouldSpill = availableMemory < mapSize * 2
-        if (!shouldSpill) {
+        if (!shouldSpill) {//不需要spill时
           shuffleMemoryMap(threadId) = mapSize * 2
         }
       }
       // Do not synchronize spills
       if (shouldSpill) {
-        spill(mapSize)
+        spill(mapSize)//spill
       }
     }
     currentMap.changeValue(key, update)
@@ -149,14 +150,15 @@ class ExternalAppendOnlyMap[K, V, C](
   }
 
   /**
+   * 将内存map中已有的内容排序，并spill到磁盘中
    * Sort the existing contents of the in-memory map and spill them to a temporary file on disk.
    */
   private def spill(mapSize: Long) {
     spillCount += 1
     logWarning("Spilling in-memory map of %d MB to disk (%d time%s so far)"
       .format(mapSize / (1024 * 1024), spillCount, if (spillCount > 1) "s" else ""))
-    val (blockId, file) = diskBlockManager.createTempBlock()
-    var writer = blockManager.getDiskWriter(blockId, file, serializer, fileBufferSize)
+    val (blockId, file) = diskBlockManager.createTempBlock()//创建一个临时文件用于输出map数据
+    var writer = blockManager.getDiskWriter(blockId, file, serializer, fileBufferSize)//writer用于写kv对到磁盘文件中
     var objectsWritten = 0
 
     // List of batch sizes (bytes) in the order they are written to disk
@@ -172,10 +174,10 @@ class ExternalAppendOnlyMap[K, V, C](
     }
 
     try {
-      val it = currentMap.destructiveSortedIterator(comparator)
+      val it = currentMap.destructiveSortedIterator(comparator)//破坏当前map，并spill到磁盘
       while (it.hasNext) {
-        val kv = it.next()
-        writer.write(kv)
+        val kv = it.next()//依次获得各键值对
+        writer.write(kv)//并写入到磁盘
         objectsWritten += 1
 
         if (objectsWritten == serializerBatchSize) {

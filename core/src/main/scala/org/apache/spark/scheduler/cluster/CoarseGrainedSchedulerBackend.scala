@@ -34,7 +34,7 @@ import org.apache.spark.util.{AkkaUtils, Utils}
 
 /**
  * A scheduler backend that waits for coarse grained executors to connect to it through Akka.
- * This backend holds onto each executor for the duration of the Spark job rather than relinquishing
+ * This backend holds onto each executor for the duration of the Spark job rather than relinquishing放弃
  * executors whenever a task is done and asking the scheduler to launch a new executor for
  * each new task. Executors may be launched in a variety of ways, such as Mesos tasks for the
  * coarse-grained Mesos mode or standalone processes for Spark's standalone deploy mode
@@ -86,7 +86,7 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
         }
 
       case StatusUpdate(executorId, taskId, state, data) =>
-        scheduler.statusUpdate(taskId, state, data.value)
+        scheduler.statusUpdate(taskId, state, data.value)//通知taskScheduler该状态更新消息
         if (TaskState.isFinished(state)) {
           if (executorActor.contains(executorId)) {
             freeCores(executorId) += scheduler.CPUS_PER_TASK
@@ -138,6 +138,10 @@ class CoarseGrainedSchedulerBackend(scheduler: TaskSchedulerImpl, actorSystem: A
     }
 
     // Launch tasks returned by a set of resource offers
+    /**
+     * 启动所有任务
+     * @param tasks
+     */
     def launchTasks(tasks: Seq[Seq[TaskDescription]]) {
       for (task <- tasks.flatten) {
         freeCores(task.executorId) -= scheduler.CPUS_PER_TASK

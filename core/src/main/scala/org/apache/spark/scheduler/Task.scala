@@ -64,7 +64,7 @@ private[spark] abstract class Task[T](val stageId: Int, var partitionId: Int) ex
   @transient protected var context: TaskContext = _
 
   // The actual Thread on which the task is running, if any. Initialized in run().
-  @volatile @transient private var taskThread: Thread = _
+  @volatile @transient private var taskThread: Thread = _ //真正执行task的线程
 
   // A flag to indicate whether the task is killed. This is used in case context is not yet
   // initialized when kill() is invoked.

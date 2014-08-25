@@ -140,6 +140,11 @@ private[spark] class ShuffleMapTask(
     split = in.readObject().asInstanceOf[Partition]
   }
 
+  /**
+   * ShuffleMapTask的执行体
+   * @param context
+   * @return 记录了存放执行结果的blockManager的地址(即FileSegment的位置)MapStatus
+   */
   override def runTask(context: TaskContext): MapStatus = {
     val numOutputSplits = dep.partitioner.numPartitions
     metrics = Some(context.taskMetrics)
@@ -152,13 +157,14 @@ private[spark] class ShuffleMapTask(
     try {
       // Obtain all the block writers for shuffle blocks.
       val ser = Serializer.getSerializer(dep.serializer)
-      shuffle = shuffleBlockManager.forMapTask(dep.shuffleId, partitionId, numOutputSplits, ser)
+      shuffle = shuffleBlockManager.forMapTask(dep.shuffleId, partitionId, numOutputSplits, ser)//获取所有的block writers
 
       // Write the map output to its associated buckets.
-      for (elem <- rdd.iterator(split, context)) {
+      //将Shuffle数据写到对应的bucket中
+      for (elem <- rdd.iterator(split, context)) {//逐条写记录
         val pair = elem.asInstanceOf[Product2[Any, Any]]
-        val bucketId = dep.partitioner.getPartition(pair._1)
-        shuffle.writers(bucketId).write(pair)
+        val bucketId = dep.partitioner.getPartition(pair._1)//获取bucketId
+        shuffle.writers(bucketId).write(pair)//根据bucketId找到对应的bucket writer，将mapOutput的record数据写到对应的bucket中
       }
 
       // Commit the writes. Get the size of each bucket block (total block size).
@@ -195,7 +201,7 @@ private[spark] class ShuffleMapTask(
       // Release the writers back to the shuffle block manager.
       if (shuffle != null && shuffle.writers != null) {
         try {
-          shuffle.releaseWriters(success)
+          shuffle.releaseWriters(success)//善后工作
         } catch {
           case e: Exception => logError("Failed to release shuffle writers", e)
         }

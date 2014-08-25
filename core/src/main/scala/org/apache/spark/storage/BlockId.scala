@@ -21,7 +21,7 @@ import java.util.UUID
 
 import org.apache.spark.annotation.DeveloperApi
 
-/**
+/**块信息
  * :: DeveloperApi ::
  * Identifies a particular Block of data, usually associated with a single file.
  * A Block can be uniquely identified by its filename, but each type of Block has a different

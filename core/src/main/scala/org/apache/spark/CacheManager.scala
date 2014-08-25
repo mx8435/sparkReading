@@ -22,7 +22,7 @@ import scala.collection.mutable.{ArrayBuffer, HashSet}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.{BlockId, BlockManager, BlockStatus, RDDBlockId, StorageLevel}
 
-/**
+/**负责传递rdd的分区给blockManager
  * Spark class responsible for passing RDDs split contents to the BlockManager and making
  * sure a node doesn't load two copies of an RDD at once.
  */
@@ -31,24 +31,26 @@ private[spark] class CacheManager(blockManager: BlockManager) extends Logging {
   /** Keys of RDD splits that are being computed/loaded. */
   private val loading = new HashSet[RDDBlockId]()
 
-  /** Gets or computes an RDD split. Used by RDD.iterator() when an RDD is cached. */
+  /** 当一个RDD cache时，会调用该方法获取或计算该RDD的split
+   * Gets or computes an RDD split. Used by RDD.iterator() when an RDD is cached. */
   def getOrCompute[T](rdd: RDD[T], split: Partition, context: TaskContext,
       storageLevel: StorageLevel): Iterator[T] = {
-    val key = RDDBlockId(rdd.id, split.index)
+    val key = RDDBlockId(rdd.id, split.index)//标识该split
     logDebug("Looking for partition " + key)
-    blockManager.get(key) match {
+    blockManager.get(key) match {//判断该RDD的split是否已经缓存在blockManager
       case Some(values) =>
         // Partition is already materialized, so just return its values
-        new InterruptibleIterator(context, values.asInstanceOf[Iterator[T]])
+        new InterruptibleIterator(context, values.asInstanceOf[Iterator[T]])//已经存在blockManager中了
 
       case None =>
+        //不在blockManager中
         // Mark the split as loading (unless someone else marks it first)
         loading.synchronized {
-          if (loading.contains(key)) {
+          if (loading.contains(key)) {//如果已经有将该split标记为loading了
             logInfo("Another thread is loading %s, waiting for it to finish...".format(key))
             while (loading.contains(key)) {
               try {
-                loading.wait()
+                loading.wait()//等待载入该split
               } catch {
                 case e: Exception =>
                   logWarning(s"Got an exception while waiting for another thread to load $key", e)
@@ -60,7 +62,8 @@ private[spark] class CacheManager(blockManager: BlockManager) extends Logging {
              * partition but we didn't want to make space for it. However, that case is unlikely
              * because it's unlikely that two threads would work on the same RDD partition. One
              * downside of the current code is that threads wait serially if this does happen. */
-            blockManager.get(key) match {
+            //已经成功将该split加载到内存blockManager中，只需再一次次从blockManager中提取该值
+             blockManager.get(key) match {
               case Some(values) =>
                 return new InterruptibleIterator(context, values.asInstanceOf[Iterator[T]])
               case None =>
@@ -68,13 +71,13 @@ private[spark] class CacheManager(blockManager: BlockManager) extends Logging {
                 loading.add(key)
             }
           } else {
-            loading.add(key)
+            loading.add(key)//没有将该split标记为loading过，需要标记。然后在接下来进行加载
           }
         }
         try {
           // If we got here, we have to load the split
           logInfo("Partition %s not found, computing it".format(key))
-          val computedValues = rdd.computeOrReadCheckpoint(split, context)
+          val computedValues = rdd.computeOrReadCheckpoint(split, context)//获取该分区对应的记录
 
           // Persist the result, so long as the task is not running locally
           if (context.runningLocally) {
@@ -84,7 +87,7 @@ private[spark] class CacheManager(blockManager: BlockManager) extends Logging {
           // Keep track of blocks with updated statuses
           var updatedBlocks = Seq[(BlockId, BlockStatus)]()
           val returnValue: Iterator[T] = {
-            if (storageLevel.useDisk && !storageLevel.useMemory) {
+            if (storageLevel.useDisk && !storageLevel.useMemory) {//只采用存储到磁盘
               /* In the case that this RDD is to be persisted using DISK_ONLY
                * the iterator will be passed directly to the blockManager (rather then
                * caching it to an ArrayBuffer first), then the resulting block data iterator
@@ -100,13 +103,13 @@ private[spark] class CacheManager(blockManager: BlockManager) extends Logging {
                   logInfo("Failure to store %s".format(key))
                   throw new Exception("Block manager failed to return persisted valued")
               }
-            } else {
+            } else {//需要将该数据cache到blockManager中：将记录存到一个ArrayBuffer中，然后将这个ArrayBuffer插入到blockManager中
               // In this case the RDD is cached to an array buffer. This will save the results
               // if we're dealing with a 'one-time' iterator
               val elements = new ArrayBuffer[Any]
               elements ++= computedValues
               updatedBlocks = blockManager.put(key, elements, storageLevel, tellMaster = true)
-              elements.iterator.asInstanceOf[Iterator[T]]
+              elements.iterator.asInstanceOf[Iterator[T]]//返回对应的迭代器
             }
           }
 

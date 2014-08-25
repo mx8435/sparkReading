@@ -23,7 +23,7 @@ import org.apache.spark.SecurityManager
 import org.apache.spark.SparkConf
 import org.apache.spark.annotation.DeveloperApi
 
-/**
+/**工厂接口
  * :: DeveloperApi ::
  * An interface for all the broadcast implementations in Spark (to allow
  * multiple broadcast implementations). SparkContext uses a user-specified

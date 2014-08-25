@@ -54,6 +54,9 @@ trait BlockFetcherIterator extends Iterator[(BlockId, Option[Iterator[Any]])] wi
 }
 
 
+/**
+ * 用于获取各个MapOutput的文件块FileSegment(在ShuffleDep中)
+ */
 private[storage]
 object BlockFetcherIterator {
 
@@ -109,6 +112,10 @@ object BlockFetcherIterator {
     // Current bytes in flight from our requests
     private var bytesInFlight = 0L
 
+    /**
+     * 根据传过来的FetchRequest去获取数据
+     * @param req
+     */
     protected def sendRequest(req: FetchRequest) {
       logDebug("Sending request for %d blocks (%s) from %s".format(
         req.blocks.size, Utils.bytesToString(req.size), req.address.hostPort))
@@ -118,7 +125,7 @@ object BlockFetcherIterator {
       })
       bytesInFlight += req.size
       val sizeMap = req.blocks.toMap  // so we can look up the size of each blockID
-      val future = connectionManager.sendMessageReliably(cmId, blockMessageArray.toBufferMessage)
+      val future = connectionManager.sendMessageReliably(cmId, blockMessageArray.toBufferMessage)//以可靠的方式发送blockMessageArray
       future.onSuccess {
         case Some(message) => {
           val bufferMessage = message.asInstanceOf[BufferMessage]
@@ -131,7 +138,7 @@ object BlockFetcherIterator {
             val blockId = blockMessage.getId
             val networkSize = blockMessage.getData.limit()
             results.put(new FetchResult(blockId, sizeMap(blockId),
-              () => dataDeserialize(blockId, blockMessage.getData, serializer)))
+              () => dataDeserialize(blockId, blockMessage.getData, serializer)))//根据返回的块信息生成一个FetchResult
             _remoteBytesRead += networkSize
             logDebug("Got remote block " + blockId + " after " + Utils.getUsedTimeMs(startTime))
           }
@@ -145,24 +152,30 @@ object BlockFetcherIterator {
       }
     }
 
+    /**
+     * 根据每个块位置信息，区分出本地块请求和远程块请求，并将其分别加入到localBlocksToFetch和remoteBlocksToFetch中。
+     * 对于远程块请求，由于一个FetchRequest可请求的数据有限，因此在一个FetchRequest容量够了时创建一个新的FetchRequest。
+     * 注意一个FetchRequest可以负责多个块：curBlocks += ((blockId, size))//该FetchRequest需负责的文件块
+     * @return
+     */
     protected def splitLocalRemoteBlocks(): ArrayBuffer[FetchRequest] = {
       // Make remote requests at most maxBytesInFlight / 5 in length; the reason to keep them
       // smaller than maxBytesInFlight is to allow multiple, parallel fetches from up to 5
       // nodes, rather than blocking on reading output from one node.
-      val targetRequestSize = math.max(maxBytesInFlight / 5, 1L)
+      val targetRequestSize = math.max(maxBytesInFlight / 5, 1L)//受内存缓存的限制，应尽量使每个fetchRequest请求的数据大小不超过此值
       logInfo("maxBytesInFlight: " + maxBytesInFlight + ", targetRequestSize: " + targetRequestSize)
 
       // Split local and remote blocks. Remote blocks are further split into FetchRequests of size
       // at most maxBytesInFlight in order to limit the amount of data in flight.
       val remoteRequests = new ArrayBuffer[FetchRequest]
       for ((address, blockInfos) <- blocksByAddress) {
-        if (address == blockManagerId) {
-          numLocal = blockInfos.size
+        if (address == blockManagerId) {//该文件块在本地
+          numLocal = blockInfos.size//本地有的文件块数
           // Filter out zero-sized blocks
           localBlocksToFetch ++= blockInfos.filter(_._2 != 0).map(_._1)
-          _numBlocksToFetch += localBlocksToFetch.size
-        } else {
-          numRemote += blockInfos.size
+          _numBlocksToFetch += localBlocksToFetch.size//更新获取的文件块信息
+        } else {//不在本地
+          numRemote += blockInfos.size//该地址对应的块数
           val iterator = blockInfos.iterator
           var curRequestSize = 0L
           var curBlocks = new ArrayBuffer[(BlockId, Long)]
@@ -170,14 +183,14 @@ object BlockFetcherIterator {
             val (blockId, size) = iterator.next()
             // Skip empty blocks
             if (size > 0) {
-              curBlocks += ((blockId, size))
-              remoteBlocksToFetch += blockId
+              curBlocks += ((blockId, size))//该FetchRequest需负责的文件块
+              remoteBlocksToFetch += blockId//入队
               _numBlocksToFetch += 1
-              curRequestSize += size
+              curRequestSize += size//更新需远程获取的总数据
             } else if (size < 0) {
               throw new BlockException(blockId, "Negative block size " + size)
             }
-            if (curRequestSize >= targetRequestSize) {
+            if (curRequestSize >= targetRequestSize) {//由于一个FetchRequest一次可请求的数据有限，因此，当该FetchRequest的需获取的数据够了时，重新创建一个FetchRequest
               // Add this FetchRequest
               remoteRequests += new FetchRequest(address, curBlocks)
               curRequestSize = 0
@@ -214,24 +227,28 @@ object BlockFetcherIterator {
       }
     }
 
+    /**
+     * blockFetcher的初始化：统计需要远程获取的数据块，随机方式加入到fetchRequests请求队列中，获取本地的块
+     */
     override def initialize() {
       // Split local and remote blocks.
       val remoteRequests = splitLocalRemoteBlocks()
       // Add the remote requests into our queue in a random order
-      fetchRequests ++= Utils.randomize(remoteRequests)
+      fetchRequests ++= Utils.randomize(remoteRequests)//随机方式加入到fetchRequests请求队列中
 
       // Send out initial requests for blocks, up to our maxBytesInFlight
+      //
       while (!fetchRequests.isEmpty &&
         (bytesInFlight == 0 || bytesInFlight + fetchRequests.front.size <= maxBytesInFlight)) {
         sendRequest(fetchRequests.dequeue())
       }
 
-      val numFetches = remoteRequests.size - fetchRequests.size
-      logInfo("Started " + numFetches + " remote fetches in" + Utils.getUsedTimeMs(startTime))
+      val numFetches = remoteRequests.size - fetchRequests.size//尚且需要开启的fetchRequest数目，fetchRequests.size是当前已有的
+      logInfo("Started " + numFetches + " remote fetches in" + Utils.getUsedTimeMs(startTime))//其实没有再开启numFetches个request
 
       // Get Local Blocks
       startTime = System.currentTimeMillis
-      getLocalBlocks()
+      getLocalBlocks()//获取本地的块
       logDebug("Got local blocks in " + Utils.getUsedTimeMs(startTime) + " ms")
     }
 
@@ -248,18 +265,22 @@ object BlockFetcherIterator {
 
     override def hasNext: Boolean = resultsGotten < _numBlocksToFetch
 
+    /**
+     * 返回(块数据对应的块信息blockId,经过反序列化的块数据)
+     * @return
+     */
     override def next(): (BlockId, Option[Iterator[Any]]) = {
       resultsGotten += 1
       val startFetchWait = System.currentTimeMillis()
-      val result = results.take()
+      val result = results.take()//获取下一个MapOutput的结果(FileSegment数据)
       val stopFetchWait = System.currentTimeMillis()
       _fetchWaitTime += (stopFetchWait - startFetchWait)
-      if (! result.failed) bytesInFlight -= result.size
+      if (! result.failed) bytesInFlight -= result.size//更新在内存中的数据，即一个BasicBlockFetcherIterator同时存到内存的数据大小
       while (!fetchRequests.isEmpty &&
-        (bytesInFlight == 0 || bytesInFlight + fetchRequests.front.size <= maxBytesInFlight)) {
+        (bytesInFlight == 0 || bytesInFlight + fetchRequests.front.size <= maxBytesInFlight)) {//BasicBlockFetcherIterator会充分利用可用的内存空间，当尚且可以存bytesInFlight时，会再发送fetchRequest获取数据
         sendRequest(fetchRequests.dequeue())
       }
-      (result.blockId, if (result.failed) None else Some(result.deserialize()))
+      (result.blockId, if (result.failed) None else Some(result.deserialize()))//获取数据
     }
   }
   // End of BasicBlockFetcherIterator

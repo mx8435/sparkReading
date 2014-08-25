@@ -493,14 +493,19 @@ private[spark] class ConnectionManager(port: Int, conf: SparkConf,
     wakeupSelector()
   }
 
+  /**
+   * 接收到请求消息message
+   * @param connection
+   * @param message
+   */
   def receiveMessage(connection: Connection, message: Message) {
     val connectionManagerId = ConnectionManagerId.fromSocketAddress(message.senderAddress)
     logDebug("Received [" + message + "] from [" + connectionManagerId + "]")
-    val runnable = new Runnable() {
+    val runnable = new Runnable() {//启动线程处理消息
       val creationTime = System.currentTimeMillis
       def run() {
         logDebug("Handler thread delay is " + (System.currentTimeMillis - creationTime) + " ms")
-        handleMessage(connectionManagerId, message, connection)
+        handleMessage(connectionManagerId, message, connection)//处理消息
         logDebug("Handling delay is " + (System.currentTimeMillis - creationTime) + " ms")
       }
     }
@@ -620,6 +625,12 @@ private[spark] class ConnectionManager(port: Int, conf: SparkConf,
     return false
   }
 
+  /**
+   * 处理某个节点的connectManager发送过来的消息
+   * @param connectionManagerId
+   * @param message
+   * @param connection
+   */
   private def handleMessage(
       connectionManagerId: ConnectionManagerId,
       message: Message,
@@ -739,6 +750,11 @@ private[spark] class ConnectionManager(port: Int, conf: SparkConf,
     wakeupSelector()
   }
 
+  /**
+   * 发送信息给ConnectionManagerId对应的ConnectManager
+   * @param connectionManagerId
+   * @param message
+   */
   private def sendMessage(connectionManagerId: ConnectionManagerId, message: Message) {
     def startNewConnection(): SendingConnection = {
       val inetSocketAddress = new InetSocketAddress(connectionManagerId.host,
@@ -762,7 +778,7 @@ private[spark] class ConnectionManager(port: Int, conf: SparkConf,
     if (authEnabled) {
       // if we aren't authenticated yet lets block the senders until authentication completes
       try {
-        connection.getAuthenticated().synchronized {
+        connection.getAuthenticated().synchronized {//设置授权信息
           val clock = SystemClock
           val startTime = clock.getTime()
 
@@ -802,7 +818,7 @@ private[spark] class ConnectionManager(port: Int, conf: SparkConf,
       }
     }
     logDebug("Sending [" + message + "] to [" + connectionManagerId + "]")
-    connection.send(message)
+    connection.send(message)//发送消息
 
     wakeupSelector()
   }

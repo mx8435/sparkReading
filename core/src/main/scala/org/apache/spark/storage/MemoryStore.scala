@@ -58,7 +58,7 @@ private class MemoryStore(blockManager: BlockManager, maxMemory: Long)
       val elements = new ArrayBuffer[Any]
       elements ++= values
       val sizeEstimate = SizeEstimator.estimate(elements.asInstanceOf[AnyRef])
-      tryToPut(blockId, elements, sizeEstimate, true)
+      tryToPut(blockId, elements, sizeEstimate, true
       PutResult(sizeEstimate, Left(values.toIterator))
     } else {
       tryToPut(blockId, bytes, bytes.limit, false)
@@ -71,24 +71,33 @@ private class MemoryStore(blockManager: BlockManager, maxMemory: Long)
       values: ArrayBuffer[Any],
       level: StorageLevel,
       returnValues: Boolean): PutResult = {
-    if (level.deserialized) {
+    if (level.deserialized) {//是反序列化出来的数据就放到左边
       val sizeEstimate = SizeEstimator.estimate(values.asInstanceOf[AnyRef])
       val putAttempt = tryToPut(blockId, values, sizeEstimate, deserialized = true)
       PutResult(sizeEstimate, Left(values.iterator), putAttempt.droppedBlocks)
-    } else {
+    } else {//否则放到右边
       val bytes = blockManager.dataSerialize(blockId, values.iterator)
       val putAttempt = tryToPut(blockId, bytes, bytes.limit, deserialized = false)
       PutResult(bytes.limit(), Right(bytes.duplicate()), putAttempt.droppedBlocks)
     }
   }
 
+  /**
+   * 将数据放入到LinkedHashMap中
+   * @param blockId
+   * @param values
+   * @param level
+   * @param returnValues
+   * @return a PutResult that contains the size of the data, as well as the values put if
+   *         returnValues is true (if not, the result's data field can be null)
+   */
   override def putValues(
       blockId: BlockId,
       values: Iterator[Any],
       level: StorageLevel,
       returnValues: Boolean): PutResult = {
     val valueEntries = new ArrayBuffer[Any]()
-    valueEntries ++= values
+    valueEntries ++= values//将结果并到valueEntries这个ArrayBuffer中，再将valueEntries放到LinkedHashMap中
     putValues(blockId, valueEntries, level, returnValues)
   }
 
@@ -105,15 +114,20 @@ private class MemoryStore(blockManager: BlockManager, maxMemory: Long)
     }
   }
 
+  /**
+   * 获取blockId对应的记录数据
+   * @param blockId
+   * @return
+   */
   override def getValues(blockId: BlockId): Option[Iterator[Any]] = {
     val entry = entries.synchronized {
       entries.get(blockId)
     }
-    if (entry == null) {
+    if (entry == null) {//如果找不到该记录，返回None
       None
-    } else if (entry.deserialized) {
+    } else if (entry.deserialized) {//反序列化过的数据
       Some(entry.value.asInstanceOf[ArrayBuffer[Any]].iterator)
-    } else {
+    } else {//是否序列化的数据，就进行反序列化
       val buffer = entry.value.asInstanceOf[ByteBuffer].duplicate() // Doesn't actually copy data
       Some(blockManager.dataDeserialize(blockId, buffer))
     }
@@ -148,7 +162,9 @@ private class MemoryStore(blockManager: BlockManager, maxMemory: Long)
     blockId.asRDDId.map(_.rddId)
   }
 
-  /**
+  /**对记录进行cache
+   * 将数据放入LinkedHashMap中。这里需要线程同步，因为在Executor中可能同一时刻有多个线程正在执行不同的tasks，从而导致数据的不一致。
+   * 序列化的放在右边，反序列化的数据放在左边
    * Try to put in a set of values, if we can free up enough space. The value should either be
    * an ArrayBuffer if deserialized is true or a ByteBuffer otherwise. Its (possibly estimated)
    * size must also be passed by the caller.
@@ -163,7 +179,7 @@ private class MemoryStore(blockManager: BlockManager, maxMemory: Long)
   private def tryToPut(
       blockId: BlockId,
       value: Any,
-      size: Long,
+      size: Long,//必须传递数据的大小
       deserialized: Boolean): ResultWithDroppedBlocks = {
 
     /* TODO: Its possible to optimize the locking by locking entries only when selecting blocks
@@ -180,11 +196,11 @@ private class MemoryStore(blockManager: BlockManager, maxMemory: Long)
       val enoughFreeSpace = freeSpaceResult.success
       droppedBlocks ++= freeSpaceResult.droppedBlocks
 
-      if (enoughFreeSpace) {
-        val entry = new Entry(value, size, deserialized)
+      if (enoughFreeSpace) {//内存充足
+        val entry = new Entry(value, size, deserialized)//将数据封装成一个Entry，放入LinkedHashMap中
         entries.synchronized {
           entries.put(blockId, entry)
-          currentMemory += size
+          currentMemory += size//更新内存占用
         }
         if (deserialized) {
           logInfo("Block %s stored as values to memory (estimated size %s, free %s)".format(
@@ -193,17 +209,17 @@ private class MemoryStore(blockManager: BlockManager, maxMemory: Long)
           logInfo("Block %s stored as bytes to memory (size %s, free %s)".format(
             blockId, Utils.bytesToString(size), Utils.bytesToString(freeMemory)))
         }
-        putSuccess = true
-      } else {
+        putSuccess = true//成功
+      } else {//内存不够，需要drop掉最早cache到内存中的分区
         // Tell the block manager that we couldn't put it in memory so that it can drop it to
         // disk if the block allows disk storage.
-        val data = if (deserialized) {
+        val data = if (deserialized) {//根据value要存放的位置，找出对应位置中可以drop掉的记录
           Left(value.asInstanceOf[ArrayBuffer[Any]])
         } else {
           Right(value.asInstanceOf[ByteBuffer].duplicate())
         }
-        val droppedBlockStatus = blockManager.dropFromMemory(blockId, data)
-        droppedBlockStatus.foreach { status => droppedBlocks += ((blockId, status)) }
+        val droppedBlockStatus = blockManager.dropFromMemory(blockId, data)//将LinkedHashMap的键blockId对应的记录从内存中剔除掉，如果有指定了磁盘存储级别，则会先将其保存到内存中
+        droppedBlockStatus.foreach { status => droppedBlocks += ((blockId, status)) }//保存这些分区记录的剔除情况
       }
     }
     ResultWithDroppedBlocks(putSuccess, droppedBlocks)

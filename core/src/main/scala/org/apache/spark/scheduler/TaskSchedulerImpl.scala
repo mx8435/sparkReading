@@ -272,11 +272,17 @@ private[spark] class TaskSchedulerImpl(
     return tasks
   }
 
+  /**
+   * 当接收到来自driver的task任务更新时调用
+   * @param tid
+   * @param state
+   * @param serializedData
+   */
   def statusUpdate(tid: Long, state: TaskState, serializedData: ByteBuffer) {
     var failedExecutor: Option[String] = None
     synchronized {
       try {
-        if (state == TaskState.LOST && taskIdToExecutorId.contains(tid)) {
+        if (state == TaskState.LOST && taskIdToExecutorId.contains(tid)) {//状态LOST，失败
           // We lost this entire executor, so remember that it's gone
           val execId = taskIdToExecutorId(tid)
           if (activeExecutorIds.contains(execId)) {
@@ -284,23 +290,23 @@ private[spark] class TaskSchedulerImpl(
             failedExecutor = Some(execId)
           }
         }
-        taskIdToTaskSetId.get(tid) match {
+        taskIdToTaskSetId.get(tid) match {//匹配task是否存在
           case Some(taskSetId) =>
             if (TaskState.isFinished(state)) {
               taskIdToTaskSetId.remove(tid)
               taskIdToExecutorId.remove(tid)
             }
             activeTaskSets.get(taskSetId).foreach { taskSet =>
-              if (state == TaskState.FINISHED) {
+              if (state == TaskState.FINISHED) {//如果是执行完成
+                taskSet.removeRunningTask(tid)//，就将其从taskSet的运行状态HashSet中移除
+                taskResultGetter.enqueueSuccessfulTask(taskSet, tid, serializedData)//加入到已经执行成功的队列中
+              } else if (Set(TaskState.FAILED, TaskState.KILLED, TaskState.LOST).contains(state)) {//task执行失败
                 taskSet.removeRunningTask(tid)
-                taskResultGetter.enqueueSuccessfulTask(taskSet, tid, serializedData)
-              } else if (Set(TaskState.FAILED, TaskState.KILLED, TaskState.LOST).contains(state)) {
-                taskSet.removeRunningTask(tid)
-                taskResultGetter.enqueueFailedTask(taskSet, tid, state, serializedData)
+                taskResultGetter.enqueueFailedTask(taskSet, tid, state, serializedData)//加入到执行失败的队列中
               }
             }
           case None =>
-            logError(
+            logError(//task不存在,当重复接收到该消息时可能发生这种情况
               ("Ignoring update with state %s for TID %s because its task set is gone (this is " +
                "likely the result of receiving duplicate task finished status updates)")
               .format(state, tid))
@@ -310,7 +316,7 @@ private[spark] class TaskSchedulerImpl(
       }
     }
     // Update the DAGScheduler without holding a lock on this, since that can deadlock
-    if (failedExecutor.isDefined) {
+    if (failedExecutor.isDefined) {//如果是task丢失，就调用dagScheduler重新执行该丢失的task
       dagScheduler.executorLost(failedExecutor.get)
       backend.reviveOffers()
     }
@@ -320,11 +326,17 @@ private[spark] class TaskSchedulerImpl(
     taskSetManager.handleTaskGettingResult(tid)
   }
 
+  /**
+   * 处理成功执行的任务
+   * @param taskSetManager
+   * @param tid
+   * @param taskResult
+   */
   def handleSuccessfulTask(
     taskSetManager: TaskSetManager,
     tid: Long,
     taskResult: DirectTaskResult[_]) = synchronized {
-    taskSetManager.handleSuccessfulTask(tid, taskResult)
+    taskSetManager.handleSuccessfulTask(tid, taskResult)//调用TaskSetManager处理成功的任务
   }
 
   def handleFailedTask(

@@ -251,6 +251,8 @@ class AppendOnlyMap[K, V](initialCapacity: Int = 64)
   }
 
   /**
+   * 用于将返回当前所有键值对有序存放的数组的迭代器，可有序遍历各键值对。但是会破坏hash table的结构，所以是destructive
+   * 。由于该操作在ExternalAppendOnlyMap中会用于spillmap前将数据有序并spill到磁盘，所以即使数组破坏了也没影响。
    * Return an iterator of the map in sorted order. This provides a way to sort the map without
    * using additional memory, at the expense of destroying the validity of the map.
    */
@@ -258,9 +260,10 @@ class AppendOnlyMap[K, V](initialCapacity: Int = 64)
     destroyed = true
     // Pack KV pairs into the front of the underlying array
     var keyIndex, newIndex = 0
+    //将所有的键值对从数组头开始一次存放
     while (keyIndex < capacity) {
-      if (data(2 * keyIndex) != null) {
-        data(newIndex) = (data(2 * keyIndex), data(2 * keyIndex + 1))
+      if (data(2 * keyIndex) != null) {//key存在，即该位置有值
+        data(newIndex) = (data(2 * keyIndex), data(2 * keyIndex + 1))//将该
         newIndex += 1
       }
       keyIndex += 1
@@ -268,14 +271,14 @@ class AppendOnlyMap[K, V](initialCapacity: Int = 64)
     assert(curSize == newIndex + (if (haveNullValue) 1 else 0))
 
     // Sort by the given ordering
-    val rawOrdering = new Comparator[AnyRef] {
+    val rawOrdering = new Comparator[AnyRef] {//comparator
       def compare(x: AnyRef, y: AnyRef): Int = {
         cmp.compare(x.asInstanceOf[(K, V)], y.asInstanceOf[(K, V)])
       }
     }
-    Arrays.sort(data, 0, newIndex, rawOrdering)
+    Arrays.sort(data, 0, newIndex, rawOrdering)//将已有的数据排序
 
-    new Iterator[(K, V)] {
+    new Iterator[(K, V)] {//返回一个迭代器
       var i = 0
       var nullValueReady = haveNullValue
       def hasNext: Boolean = (i < newIndex || nullValueReady)

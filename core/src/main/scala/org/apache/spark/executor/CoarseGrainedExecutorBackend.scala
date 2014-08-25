@@ -29,6 +29,14 @@ import org.apache.spark.deploy.worker.WorkerWatcher
 import org.apache.spark.scheduler.cluster.CoarseGrainedClusterMessages._
 import org.apache.spark.util.{AkkaUtils, Utils}
 
+/**
+ * CoarseGrainedExecutorBackend进程包含一个Executor，每个Executor含有一个线程池，线程池中的每个线程可以处理一个
+ * task，而线程池所处理的task同属于同一个app
+ * @param driverUrl
+ * @param executorId
+ * @param hostPort
+ * @param cores
+ */
 private[spark] class CoarseGrainedExecutorBackend(
     driverUrl: String,
     executorId: String,
@@ -88,6 +96,12 @@ private[spark] class CoarseGrainedExecutorBackend(
       context.system.shutdown()
   }
 
+  /**
+   * 将状态更新汇报给driver
+   * @param taskId
+   * @param state
+   * @param data
+   */
   override def statusUpdate(taskId: Long, state: TaskState, data: ByteBuffer) {
     driver ! StatusUpdate(executorId, taskId, state, data)
   }

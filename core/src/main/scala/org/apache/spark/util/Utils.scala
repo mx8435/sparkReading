@@ -953,7 +953,8 @@ private[spark] object Utils extends Logging {
     buf
   }
 
- /* Calculates 'x' modulo 'mod', takes to consideration sign of x,
+ /**HashPartitioner模运算的地方。
+  Calculates 'x' modulo 'mod', takes to consideration sign of x,
   * i.e. if 'x' is negative, than 'x' % 'mod' is negative too
   * so function return (x % mod) + mod in that case.
   */

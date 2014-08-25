@@ -42,18 +42,18 @@ private[spark] class HttpBroadcast[T: ClassTag](
 
   def getValue = value_
 
-  val blockId = BroadcastBlockId(id)
+  val blockId = BroadcastBlockId(id)//id是全局唯一的广播编号
 
   /*
    * Broadcasted data is also stored in the BlockManager of the driver. The BlockManagerMaster
    * does not need to be told about this block as not only need to know about this data block.
    */
-  HttpBroadcast.synchronized {
+  HttpBroadcast.synchronized {//将bcdata放入blockManager中，需要同步
     SparkEnv.get.blockManager.putSingle(
       blockId, value_, StorageLevel.MEMORY_AND_DISK, tellMaster = false)
   }
 
-  if (!isLocal) {
+  if (!isLocal) {//如果不是本地模式会为广播变量其创建一个文件，如果是本地的话不需要广播？？？
     HttpBroadcast.write(id, value_)
   }
 
@@ -77,7 +77,8 @@ private[spark] class HttpBroadcast[T: ClassTag](
     out.defaultWriteObject()
   }
 
-  /** Used by the JVM when deserializing this object. */
+  /** 读取broadcast对象？
+   * Used by the JVM when deserializing this object. */
   private def readObject(in: ObjectInputStream) {
     in.defaultReadObject()
     HttpBroadcast.synchronized {
@@ -117,13 +118,19 @@ private[spark] object HttpBroadcast extends Logging {
   private var compressionCodec: CompressionCodec = null
   private var cleaner: MetadataCleaner = null
 
+  /**
+   * 初始化Http broadcast相关配置信息
+   * @param isDriver
+   * @param conf
+   * @param securityMgr
+   */
   def initialize(isDriver: Boolean, conf: SparkConf, securityMgr: SecurityManager) {
     synchronized {
       if (!initialized) {
         bufferSize = conf.getInt("spark.buffer.size", 65536)
         compress = conf.getBoolean("spark.broadcast.compress", true)
         securityManager = securityMgr
-        if (isDriver) {
+        if (isDriver) {//在driver上创建临时目录并启动HttpServer
           createServer(conf)
           conf.set("spark.httpBroadcast.uri",  serverUri)
         }
@@ -150,6 +157,10 @@ private[spark] object HttpBroadcast extends Logging {
     }
   }
 
+  /**
+   * 创建一个临时目录，并在该目录上启动一个HttpServer
+   * @param conf
+   */
   private def createServer(conf: SparkConf) {
     broadcastDir = Utils.createTempDir(Utils.getLocalDir(conf))
     server = new HttpServer(broadcastDir, securityManager)
@@ -158,8 +169,18 @@ private[spark] object HttpBroadcast extends Logging {
     logInfo("Broadcast server started at " + serverUri)
   }
 
+  /**
+   * 在broadcastDir目录下面创建一个文件
+   * @param id
+   * @return
+   */
   def getFile(id: Long) = new File(broadcastDir, BroadcastBlockId(id).name)
 
+  /**
+   * 在broadcast目录下创建一个文件，并将value的数据存到该文件中
+   * @param id
+   * @param value
+   */
   def write(id: Long, value: Any) {
     val file = getFile(id)
     val out: OutputStream = {

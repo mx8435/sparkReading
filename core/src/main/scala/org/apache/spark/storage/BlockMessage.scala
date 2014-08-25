@@ -108,7 +108,7 @@ private[spark] class BlockMessage() {
   }
 
   def getType: Int = typ
-  def getId: BlockId = id
+  def getId: BlockId = id//返回块信息
   def getData: ByteBuffer = data
   def getLevel: StorageLevel =  level
 
@@ -183,9 +183,14 @@ private[spark] object BlockMessage {
     newBlockMessage
   }
 
+  /**
+   * 在找到对方请求的块时回送封装好块数据的BlockMessage
+   * @param gotBlock
+   * @return
+   */
   def fromGotBlock(gotBlock: GotBlock): BlockMessage = {
     val newBlockMessage = new BlockMessage()
-    newBlockMessage.set(gotBlock)
+    newBlockMessage.set(gotBlock)//该块消息
     newBlockMessage
   }
 

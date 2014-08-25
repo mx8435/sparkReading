@@ -43,7 +43,7 @@ case class Aggregator[K, V, C] (
   def combineValuesByKey(iter: Iterator[_ <: Product2[K, V]],
                          context: TaskContext): Iterator[(K, C)] = {
     if (!externalSorting) {
-      val combiners = new AppendOnlyMap[K,C]
+      val combiners = new AppendOnlyMap[K,C]//采用AppendOnlyMap(HashMap)将数据存放到内存中，在内存中进行排序
       var kv: Product2[K, V] = null
       val update = (hadValue: Boolean, oldValue: C) => {
         if (hadValue) mergeValue(oldValue, kv._2) else createCombiner(kv._2)
@@ -53,7 +53,7 @@ case class Aggregator[K, V, C] (
         combiners.changeValue(kv._1, update)
       }
       combiners.iterator
-    } else {
+    } else {//如果是内存+磁盘，则存到ExternalAppendOnlyMap进行排序，可以将数据sort并spill到磁盘
       val combiners = new ExternalAppendOnlyMap[K, V, C](createCombiner, mergeValue, mergeCombiners)
       while (iter.hasNext) {
         val (k, v) = iter.next()

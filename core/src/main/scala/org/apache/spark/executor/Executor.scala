@@ -135,6 +135,12 @@ private[spark] class Executor(
     localDirs
   }
 
+  /**
+   * 一个task的执行体
+   * @param execBackend
+   * @param taskId
+   * @param serializedTask
+   */
   class TaskRunner(execBackend: ExecutorBackend, taskId: Long, serializedTask: ByteBuffer)
     extends Runnable {
 
@@ -149,13 +155,18 @@ private[spark] class Executor(
       }
     }
 
+    /**
+     * 执行task：
+     * val value = task.run(taskId.toInt)//执行task，获得返回值
+     * 并返回执行结果信息给driver
+     */
     override def run() {
       val startTime = System.currentTimeMillis()
       SparkEnv.set(env)
       Thread.currentThread.setContextClassLoader(replClassLoader)
       val ser = SparkEnv.get.closureSerializer.newInstance()
       logInfo("Running task ID " + taskId)
-      execBackend.statusUpdate(taskId, TaskState.RUNNING, EMPTY_BYTE_BUFFER)
+      execBackend.statusUpdate(taskId, TaskState.RUNNING, EMPTY_BYTE_BUFFER)//更新为task正在执行,汇报给driver
       var attemptedTask: Option[Task[Any]] = None
       var taskStart: Long = 0
       def gcTime = ManagementFactory.getGarbageCollectorMXBeans.map(_.getCollectionTime).sum
@@ -164,6 +175,7 @@ private[spark] class Executor(
       try {
         SparkEnv.set(env)
         Accumulators.clear()
+        //反序列化Backend进程发过来的与该task相关的数据：taskFiles, taskJars, taskBytes
         val (taskFiles, taskJars, taskBytes) = Task.deserializeWithDependencies(serializedTask)
         updateDependencies(taskFiles, taskJars)
         task = ser.deserialize[Task[Any]](taskBytes, Thread.currentThread.getContextClassLoader)
@@ -178,14 +190,14 @@ private[spark] class Executor(
           throw new TaskKilledException
         }
 
-        attemptedTask = Some(task)
+        attemptedTask = Some(task)//attpemtedTask一次尝试执行
         logDebug("Task " + taskId + "'s epoch is " + task.epoch)
-        env.mapOutputTracker.updateEpoch(task.epoch)
+        env.mapOutputTracker.updateEpoch(task.epoch)//向mapOutputTracker更新该task所处的阶段epoch
 
         // Run the actual task and measure its runtime.
         taskStart = System.currentTimeMillis()
-        val value = task.run(taskId.toInt)
-        val taskFinish = System.currentTimeMillis()
+        val value = task.run(taskId.toInt)//执行task，获得返回值
+        val taskFinish = System.currentTimeMillis()//task结束时间
 
         // If the task has been killed, let's fail it.
         if (task.killed) {
@@ -194,10 +206,10 @@ private[spark] class Executor(
 
         val resultSer = SparkEnv.get.serializer.newInstance()
         val beforeSerialization = System.currentTimeMillis()
-        val valueBytes = resultSer.serialize(value)
+        val valueBytes = resultSer.serialize(value)//对执行结果进行序列化，返送回
         val afterSerialization = System.currentTimeMillis()
 
-        for (m <- task.metrics) {
+        for (m <- task.metrics) {//更新task的执行信息
           m.hostname = Utils.localHostName()
           m.executorDeserializeTime = taskStart - startTime
           m.executorRunTime = taskFinish - taskStart
@@ -208,23 +220,23 @@ private[spark] class Executor(
         val accumUpdates = Accumulators.values
 
         val directResult = new DirectTaskResult(valueBytes, accumUpdates,
-          task.metrics.getOrElse(null))
-        val serializedDirectResult = ser.serialize(directResult)
+          task.metrics.getOrElse(null))//将执行结果封装成DirectTaskResult
+        val serializedDirectResult = ser.serialize(directResult)//对封装好的DirectTaskResult序列化
         logInfo("Serialized size of result for " + taskId + " is " + serializedDirectResult.limit)
         val serializedResult = {
-          if (serializedDirectResult.limit >= akkaFrameSize - 1024) {
+          if (serializedDirectResult.limit >= akkaFrameSize - 1024) {//当执行结果大于akkaFrameSize-1024时，数据过大，直接放到本地blockManager
             logInfo("Storing result for " + taskId + " in local BlockManager")
-            val blockId = TaskResultBlockId(taskId)
+            val blockId = TaskResultBlockId(taskId)//获取需要将task执行结果存至本地哪个blockManager
             env.blockManager.putBytes(
               blockId, serializedDirectResult, StorageLevel.MEMORY_AND_DISK_SER)
-            ser.serialize(new IndirectTaskResult[Any](blockId))
+            ser.serialize(new IndirectTaskResult[Any](blockId))//再返回Shuffle输出在本地的存储信息
           } else {
             logInfo("Sending result for " + taskId + " directly to driver")
-            serializedDirectResult
+            serializedDirectResult//直接将数据发送给Driver
           }
         }
 
-        execBackend.statusUpdate(taskId, TaskState.FINISHED, serializedResult)
+        execBackend.statusUpdate(taskId, TaskState.FINISHED, serializedResult)//更新task的执行状态为FINISHED，汇报给driver
         logInfo("Finished task ID " + taskId)
       } catch {
         case ffe: FetchFailedException => {
@@ -262,7 +274,7 @@ private[spark] class Executor(
         // TODO: Unregister shuffle memory only for ResultTask
         val shuffleMemoryMap = env.shuffleMemoryMap
         shuffleMemoryMap.synchronized {
-          shuffleMemoryMap.remove(Thread.currentThread().getId)
+          shuffleMemoryMap.remove(Thread.currentThread().getId)//清除该ShuffleMemoryMap的内存占用
         }
         runningTasks.remove(taskId)
       }

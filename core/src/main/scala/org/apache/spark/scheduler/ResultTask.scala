@@ -105,6 +105,11 @@ private[spark] class ResultTask[T, U](
     if (locs == null) Nil else locs.toSet.toSeq
   }
 
+  /**
+   * ResultTask执行体，对数据执行func
+   * @param context
+   * @return
+   */
   override def runTask(context: TaskContext): U = {
     metrics = Some(context.taskMetrics)
     try {
@@ -118,14 +123,18 @@ private[spark] class ResultTask[T, U](
 
   override def toString = "ResultTask(" + stageId + ", " + partitionId + ")"
 
+  /**
+   * 将数据序列化后传出去
+   * @param out
+   */
   override def writeExternal(out: ObjectOutput) {
     RDDCheckpointData.synchronized {
       split = rdd.partitions(partitionId)
       out.writeInt(stageId)
-      val bytes = ResultTask.serializeInfo(
+      val bytes = ResultTask.serializeInfo(//将rdd信息和待执行的函数序列化
         stageId, rdd, func.asInstanceOf[(TaskContext, Iterator[_]) => _])
       out.writeInt(bytes.length)
-      out.write(bytes)
+      out.write(bytes)//传出去
       out.writeInt(partitionId)
       out.writeInt(outputId)
       out.writeLong(epoch)
@@ -133,12 +142,16 @@ private[spark] class ResultTask[T, U](
     }
   }
 
+  /**
+   * 读取外部传过来的序列化数据
+   * @param in
+   */
   override def readExternal(in: ObjectInput) {
     val stageId = in.readInt()
     val numBytes = in.readInt()
     val bytes = new Array[Byte](numBytes)
     in.readFully(bytes)
-    val (rdd_, func_) = ResultTask.deserializeInfo(stageId, bytes)
+    val (rdd_, func_) = ResultTask.deserializeInfo(stageId, bytes)//反序列化出rdd和待执行的函数
     rdd = rdd_.asInstanceOf[RDD[T]]
     func = func_.asInstanceOf[(TaskContext, Iterator[T]) => U]
     partitionId = in.readInt()

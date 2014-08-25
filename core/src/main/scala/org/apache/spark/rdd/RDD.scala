@@ -181,7 +181,7 @@ abstract class RDD[T: ClassTag](
   /** An Option holding our checkpoint RDD, if we are checkpointed */
   private def checkpointRDD: Option[RDD[T]] = checkpointData.flatMap(_.checkpointRDD)
 
-  /**
+  /**返回该RDD的所有依赖关系
    * Get the list of dependencies of this RDD, taking into account whether the
    * RDD is checkpointed or not.
    */
@@ -194,7 +194,7 @@ abstract class RDD[T: ClassTag](
     }
   }
 
-  /**
+  /**获取该RDD的分区，
    * Get the array of partitions of this RDD, taking into account whether the
    * RDD is checkpointed or not.
    */
@@ -223,7 +223,7 @@ abstract class RDD[T: ClassTag](
    * subclasses of RDD.
    */
   final def iterator(split: Partition, context: TaskContext): Iterator[T] = {
-    if (storageLevel != StorageLevel.NONE) {
+    if (storageLevel != StorageLevel.NONE) {//有设置了存储级别，调用cacheManager的getOrCompute
       SparkEnv.get.cacheManager.getOrCompute(this, split, context, storageLevel)
     } else {
       computeOrReadCheckpoint(split, context)
@@ -259,7 +259,8 @@ abstract class RDD[T: ClassTag](
    */
   private[spark] def computeOrReadCheckpoint(split: Partition, context: TaskContext): Iterator[T] =
   {
-    if (isCheckpointed) firstParent[T].iterator(split, context) else compute(split, context)
+    if (isCheckpointed) firstParent[T].iterator(split, context) //如果该partition已经checkpoint了，就直接从checkpoint中读取并返回该partition的所有records
+    else compute(split, context)//没有checkpoint过，需要重新计算该分区
   }
 
   // Transformations (return a new RDD)
@@ -1107,7 +1108,9 @@ abstract class RDD[T: ClassTag](
     sc.runJob(this, (iter: Iterator[T]) => iter.toArray)
   }
 
-  /**
+  /**将一个RDD标记为checkpointing，则他会被保存到checkpoint目录下。
+    * 由于checkpoint需要在job执行完后，再单独开一个job去checkpoint，因此，对于需要checkpoint的RDD，
+    * 最后事先将其cache到内存
    * Mark this RDD for checkpointing. It will be saved to a file inside the checkpoint
    * directory set with SparkContext.setCheckpointDir() and all references to its parent
    * RDDs will be removed. This function must be called before any job has been
@@ -1119,7 +1122,7 @@ abstract class RDD[T: ClassTag](
       throw new Exception("Checkpoint directory has not been set in the SparkContext")
     } else if (checkpointData.isEmpty) {
       checkpointData = Some(new RDDCheckpointData(this))
-      checkpointData.get.markForCheckpoint()
+      checkpointData.get.markForCheckpoint()//将此RDD标记为MarkedForCheckpoint
     }
   }
 
@@ -1162,13 +1165,13 @@ abstract class RDD[T: ClassTag](
   // Avoid handling doCheckpoint multiple times to prevent excessive recursion
   @transient private var doCheckpointCalled = false
 
-  /**
+  /**执行本RDD的checkpoint
    * Performs the checkpointing of this RDD by saving this. It is called after a job using this RDD
    * has completed (therefore the RDD has been materialized and potentially stored in memory).
    * doCheckpoint() is called recursively on the parent RDDs.
    */
   private[spark] def doCheckpoint() {
-    if (!doCheckpointCalled) {
+    if (!doCheckpointCalled) {//尚未ckpt过
       doCheckpointCalled = true
       if (checkpointData.isDefined) {
         checkpointData.get.doCheckpoint()

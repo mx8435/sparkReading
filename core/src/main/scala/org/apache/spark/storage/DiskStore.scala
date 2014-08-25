@@ -93,15 +93,20 @@ private class DiskStore(blockManager: BlockManager, diskManager: DiskBlockManage
     }
   }
 
+  /**
+   * 在本地磁盘查找blockId对应的文件块
+   * @param blockId
+   * @return
+   */
   override def getBytes(blockId: BlockId): Option[ByteBuffer] = {
-    val segment = diskManager.getBlockLocation(blockId)
-    val channel = new RandomAccessFile(segment.file, "r").getChannel()
+    val segment = diskManager.getBlockLocation(blockId)//获取blockId对应的文件块fileSegment的在本地的位置信息
+    val channel = new RandomAccessFile(segment.file, "r").getChannel()//创建一个随机访问文件对象
 
     try {
       // For small files, directly read rather than memory map
-      if (segment.length < minMemoryMapBytes) {
+      if (segment.length < minMemoryMapBytes) {//如果内存够，直接读到内存中
         val buf = ByteBuffer.allocate(segment.length.toInt)
-        channel.read(buf, segment.offset)
+        channel.read(buf, segment.offset)//读取该文件
         buf.flip()
         Some(buf)
       } else {

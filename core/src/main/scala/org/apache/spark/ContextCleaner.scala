@@ -100,7 +100,8 @@ private[spark] class ContextCleaner(sc: SparkContext) extends Logging {
     registerForCleanup(shuffleDependency, CleanShuffle(shuffleDependency.shuffleId))
   }
 
-  /** Register a Broadcast for cleanup when it is garbage collected. */
+  /** 注册一个Broadcast，使得在垃圾回收时可以被回收
+   * Register a Broadcast for cleanup when it is garbage collected. */
   def registerBroadcastForCleanup[T](broadcast: Broadcast[T]) {
     registerForCleanup(broadcast, CleanBroadcast(broadcast.id))
   }

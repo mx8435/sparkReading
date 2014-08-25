@@ -19,6 +19,9 @@ package org.apache.spark
 
 import org.apache.mesos.Protos.{TaskState => MesosTaskState}
 
+/** *
+  * 任务的状态
+  */
 private[spark] object TaskState extends Enumeration {
 
   val LAUNCHING, RUNNING, FINISHED, FAILED, KILLED, LOST = Value

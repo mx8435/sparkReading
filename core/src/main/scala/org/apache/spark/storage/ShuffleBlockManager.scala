@@ -29,7 +29,9 @@ import org.apache.spark.storage.ShuffleBlockManager.ShuffleFileGroup
 import org.apache.spark.util.{MetadataCleaner, MetadataCleanerType, TimeStampedHashMap}
 import org.apache.spark.util.collection.{PrimitiveKeyOpenHashMap, PrimitiveVector}
 
-/** A group of writers for a ShuffleMapTask, one writer per reducer. */
+/**一个Writer对应一个Reducer？
+ *  A group of writers for a ShuffleMapTask, one writer per reducer.
+ */
 private[spark] trait ShuffleWriterGroup {
   val writers: Array[BlockObjectWriter]
 
